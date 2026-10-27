@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WealthFund Calling CRM - Comprehensive Project Changes & Architecture Report</title>
+<style>
+  @page {
+    size: A4;
+    margin: 15mm 15mm 15mm 15mm;
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1e293b;
+    background-color: #ffffff;
+    line-height: 1.5;
+    font-size: 11pt;
+    margin: 0;
+    padding: 0;
+  }
+  .header-cover {
+    border-bottom: 2px solid #2563eb;
+    padding-bottom: 15px;
+    margin-bottom: 25px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    font-size: 8.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 9999px;
+    background-color: #dbeafe;
+    color: #1d4ed8;
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 22pt;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0 0 8px 0;
+    line-height: 1.2;
+  }
+  .subtitle {
+    font-size: 12pt;
+    color: #475569;
+    margin: 0 0 15px 0;
+  }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 9pt;
+  }
+  .meta-item strong {
+    display: block;
+    color: #64748b;
+    font-size: 8pt;
+    text-transform: uppercase;
+  }
+  .meta-item span {
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  h2 {
+    font-size: 14pt;
+    font-weight: 700;
+    color: #1e3a8a;
+    border-bottom: 1.5px solid #cbd5e1;
+    padding-bottom: 5px;
+    margin-top: 25px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+  }
+  h2 .num {
+    background-color: #2563eb;
+    color: white;
+    font-size: 10pt;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 8px;
+  }
+  h3 {
+    font-size: 11.5pt;
+    font-weight: 600;
+    color: #0f172a;
+    margin-top: 15px;
+    margin-bottom: 6px;
+  }
+
+  p {
+    margin: 0 0 10px 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 16px;
+    font-size: 9.5pt;
+  }
+  th {
+    background-color: #f1f5f9;
+    color: #334155;
+    font-weight: 700;
+    text-align: left;
+    padding: 7px 10px;
+    border: 1px solid #cbd5e1;
+  }
+  td {
+    padding: 6px 10px;
+    border: 1px solid #e2e8f0;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td {
+    background-color: #f8fafc;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 7.5pt;
+    font-weight: 600;
+    border-radius: 4px;
+    margin-right: 4px;
+  }
+  .tag-add { background-color: #dcfce7; color: #15803d; }
+  .tag-mod { background-color: #fef3c7; color: #b45309; }
+  .tag-fix { background-color: #e0e7ff; color: #4338ca; }
+  .tag-sec { background-color: #fee2e2; color: #b91c1c; }
+
+  ul {
+    margin: 0 0 12px 0;
+    padding-left: 20px;
+  }
+  li {
+    margin-bottom: 4px;
+  }
+
+  .highlight-box {
+    background-color: #eff6ff;
+    border-left: 4px solid #3b82f6;
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 14px;
+    font-size: 9.5pt;
+  }
+  .code-pill {
+    font-family: Consolas, monospace;
+    background-color: #f1f5f9;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 8.5pt;
+    border: 1px solid #e2e8f0;
+    color: #0f172a;
+  }
+
+  .page-break {
+    page-break-after: always;
+  }
+  .avoid-break {
+    page-break-inside: avoid;
+  }
+
+  .footer-note {
+    margin-top: 30px;
+    padding-top: 10px;
+    border-top: 1px solid #e2e8f0;
+    font-size: 8.5pt;
+    color: #94a3b8;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+  <!-- COVER / HEADER -->
+  <div class="header-cover">
+    <div class="badge">Comprehensive Audit & Changelog</div>
+    <h1>WealthFund Calling CRM — Complete Changes & Technical Architecture Report</h1>
+    <div class="subtitle">Detailed breakdown of all features, cPanel cloud adaptations, database optimizations, and system enhancements</div>
+    
+    <div class="meta-grid">
+      <div class="meta-item">
+        <strong>Project</strong>
+        <span>Calling CRM (v3.0)</span>
+      </div>
+      <div class="meta-item">
+        <strong>GitHub Repository</strong>
+        <span>pranav8799/wealthfunds28102026</span>
+      </div>
+      <div class="meta-item">
+        <strong>Target Environment</strong>
+        <span>BigRock cPanel / Cloud Linux</span>
+      </div>
+      <div class="meta-item">
+        <strong>Generated Date</strong>
+        <span>October 28, 2026</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 1 -->
+  <h2><span class="num">1</span> Executive Summary & Recent cPanel Deployment Changes</h2>
+  <p>This report documents the exhaustive list of modifications made across the <strong>Calling CRM</strong> system, with special focus on transforming the local XAMPP-based installation into an enterprise-ready, cloud-hosted production web application running on <strong>BigRock cPanel</strong>.</p>
+
+  <div class="highlight-box">
+    <strong>Key Milestone Achieved:</strong> The CRM was fully ported, bundled, git-versioned, and configured to execute via CloudLinux Phusion Passenger in BigRock cPanel. The application requires zero compilation overhead on shared hosting servers and features built-in database resilience.
+  </div>
+
+  <table class="avoid-break">
+    <thead>
+      <tr>
+        <th style="width: 25%;">File / Component</th>
+        <th style="width: 15%;">Change Type</th>
+        <th>Description & Impact</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="code-pill">server/src/db.js</span></td>
+        <td><span class="tag tag-fix">FIX</span> <span class="tag tag-sec">DATABASE</span></td>
+        <td>
+          <strong>Handled cPanel Database Permission Restrictions:</strong> Rewrote <span class="code-pill">db.init()</span>. On cPanel shared hosting, database users are restricted to their assigned database (<span class="code-pill">user_dbname</span>) and lack global <span class="code-pill">CREATE DATABASE</span> privileges. The code now catches privilege denial gracefully and verifies connection directly via the pool. Added diagnostic alerts for <span class="code-pill">ER_BAD_DB_ERROR</span> and <span class="code-pill">ER_ACCESS_DENIED_ERROR</span>.
+        </td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">server/src/index.js</span></td>
+        <td><span class="tag tag-mod">ENHANCE</span></td>
+        <td>
+          <strong>Flexible Static Dist Routing:</strong> Updated Express to dynamically detect the built React frontend from candidate paths (<span class="code-pill">client/dist</span>, <span class="code-pill">server/dist</span>, <span class="code-pill">dist</span>, <span class="code-pill">public</span>). Automatically logs the active static directory and serves React SPA routes while preserving <span class="code-pill">/api/*</span> endpoints.
+        </td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">server/app.js</span> &amp; <span class="code-pill">app.js</span></td>
+        <td><span class="tag tag-add">NEW</span></td>
+        <td>
+          <strong>Phusion Passenger Entry Points:</strong> Created entry points at both the server root and project root required by CloudLinux "Setup Node.js App" in cPanel to execute the backend cleanly.
+        </td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">database/cpanel_import.sql</span></td>
+        <td><span class="tag tag-add">NEW</span></td>
+        <td>
+          <strong>cPanel-Safe Database Script:</strong> Created a clean SQL import schema without hardcoded <span class="code-pill">CREATE DATABASE</span> and <span class="code-pill">USE calling_crm</span> commands. Enables error-free direct import via phpMyAdmin in cPanel without <span class="code-pill">#1044 Access Denied</span> failures.
+        </td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">package-cpanel.bat</span></td>
+        <td><span class="tag tag-add">NEW</span></td>
+        <td>
+          <strong>One-Click Production Packager:</strong> Created a Windows batch automation script that triggers Vite production build, copies frontend assets to <span class="code-pill">server/dist</span>, and packages all server files into a lightweight zip (<span class="code-pill">calling-crm-cpanel.zip</span>) of only 288 KB (excluding bulky <span class="code-pill">node_modules</span>).
+        </td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">.gitignore</span></td>
+        <td><span class="tag tag-mod">MOD</span></td>
+        <td>
+          <strong>Tracked Prebuilt Frontend in Git:</strong> Modified Git ignore rules to whitelist and track <span class="code-pill">!server/dist/</span> so when cPanel clones or pulls from GitHub, the compiled React application is immediately available without running <span class="code-pill">npm run build</span> on shared hosting.
+        </td>
+      </tr>
+      <tr>
+        <td><strong>GitHub Repository Migration</strong></td>
+        <td><span class="tag tag-add">MIGRATE</span></td>
+        <td>
+          <strong>New Remote Origin &amp; Initial Push:</strong> Initialized, linked, and pushed the entire modernized repository to <span class="code-pill">https://github.com/pranav8799/wealthfunds28102026.git</span> on branch <span class="code-pill">main</span>.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- SECTION 2 -->
+  <div class="page-break"></div>
+  <h2><span class="num">2</span> Complete Module-by-Module Project Changes & Features</h2>
+
+  <h3>A. Lead Ingestion, Parsing & Google Sheets Synchronization</h3>
+  <ul>
+    <li><strong>Multi-Format Import Support:</strong> Integrated parser for <strong>Excel (.xlsx, .xls)</strong> and <strong>CSV</strong> files with memory buffering (25MB limit) using <span class="code-pill">multer</span> memory storage (no residual files left on disk).</li>
+    <li><strong>Google Sheets Real-Time Sync:</strong> Added URL-based sheet fetcher. When a published Google Sheet is linked, the CRM auto-synchronizes new entries every 15 minutes (<span class="code-pill">SYNC_MINUTES</span>) in the background.</li>
+    <li><strong>Intelligent Column Detection:</strong> Automatic header detection and mapping algorithm that identifies client name and telephone numbers across diverse sheet headers.</li>
+    <li><strong>Data Normalization:</strong> Strips extraneous characters, international dialing prefixes (<span class="code-pill">+91</span>, <span class="code-pill">0</span>, <span class="code-pill">p:</span>), and enforces strict 10-digit mobile phone sanitization.</li>
+    <li><strong>Duplicate Protection:</strong> Database-level uniqueness on <span class="code-pill">leads.mobile</span> ensures existing clients are never duplicated during mass imports.</li>
+  </ul>
+
+  <h3>B. Automated Lead Distribution Engine (v3 Cutoff Logic)</h3>
+  <ul>
+    <li><strong>Background Distribution Runner:</strong> Automated daemon running every 60 seconds (<span class="code-pill">inbox.distributeFresh()</span>) that balances uncalled leads among active team members.</li>
+    <li><strong>Pre-12:00 PM Distribution:</strong> Prior to 12:00 PM cutoff, leads are distributed equally across all active executives who are not flagged as Absent or on Leave.</li>
+    <li><strong>Post-12:00 PM Real-Time Rebalancing:</strong> After 12:00 PM, executives who have not logged in are identified; their untouched, uncalled fresh leads are automatically reclaimed and redistributed among present, logged-in executives.</li>
+    <li><strong>Late Login Re-allocation:</strong> If an executive signs in after 12:00 PM, the system recognizes their presence and assigns their proportional quota of fresh leads.</li>
+    <li><strong>Sunday / Weekly Off Rule:</strong> Respects configurable weekly off days (<span class="code-pill">WEEKLY_OFF=0</span> for Sunday), distributing exclusively to staff who sign in voluntarily.</li>
+  </ul>
+
+  <h3>C. Calling Desk & Two-Way Mobile Device Synchronization</h3>
+  <ul>
+    <li><strong>PC Calling Desk:</strong> Interactive calling dashboard with live stopwatch timer, client history, previous call remarks, and immediate status updates.</li>
+    <li><strong>Web Phone Mode:</strong> Mobile web application interface (<span class="code-pill">/executive/phone</span>). When an executive clicks "Call" on their PC, their connected smartphone screen vibrates and automatically loads the dial pad with the client's number.</li>
+    <li><strong>QR Code Fallback:</strong> Automatic on-screen QR code generation allows instant dialer launch by scanning the screen if web sockets/Wi-Fi are disconnected.</li>
+    <li><strong>Native Android Companion App:</strong> Integrated Android background dialer application (<span class="code-pill">android-app/</span>) capable of detecting native Android telephony call state changes and reporting exact talk durations directly to MySQL.</li>
+    <li><strong>Tamper-Proof Duration Metrics:</strong> Call duration is computed by the backend server based on verified call timestamps, preventing executives from manually manipulating talk times.</li>
+  </ul>
+
+  <h3>D. Security, Device Verification & Role-Based Access Control</h3>
+  <ul>
+    <li><strong>Role Separation:</strong> Segregated routing and permission layers for <strong>Admin</strong> (<span class="code-pill">/admin/login</span>) and <strong>Executive</strong> (<span class="code-pill">/login</span>).</li>
+    <li><strong>Bcrypt Password Hashing:</strong> Passwords stored using salted <span class="code-pill">bcryptjs</span> hashes.</li>
+    <li><strong>Hardware Device Fingerprinting:</strong> System tracks device hashes in <span class="code-pill">trusted_devices</span> table. Any login from an unfamiliar PC, phone, or browser requires OTP validation.</li>
+    <li><strong>Dual OTP Modes:</strong> Supports both <strong>SMS Gateway</strong> (Powerstext DLT-approved routes) and <strong>Admin-Assisted OTP</strong> (displayed directly on Admin panel for instant verbal verification without SMS cost).</li>
+    <li><strong>Brute-Force Safeguards:</strong> Enforces 30-second delays between OTP requests, maximum 8 OTP requests per hour, and automatic invalidation after 5 consecutive incorrect attempts.</li>
+  </ul>
+
+  <h3>E. Attendance & Comprehensive Activity Auditing</h3>
+  <ul>
+    <li><strong>Automated Attendance Tracking:</strong> Executives are automatically registered as "Present" upon their initial sign-in of the day with exact timestamp logging.</li>
+    <li><strong>Admin Attendance Grid:</strong> Full-month calendar view allowing administrators to record leaves, half-days, and absences with custom notes.</li>
+    <li><strong>Tamper-Proof Activity Log:</strong> High-granularity logging of every sign-in, call outcome, lead status transition, reassignment, remark edit, and batch import with executive ID, client ID, client IP, and UTC timestamps.</li>
+    <li><strong>Lead Sharing & Notes:</strong> Inter-executive lead sharing module with transfer notes; transferred leads surface directly in the recipient's "Shared with me" filter tab.</li>
+  </ul>
+
+  <!-- SECTION 3 -->
+  <div class="page-break"></div>
+  <h2><span class="num">3</span> Database Schema & Automated Migrations</h2>
+  <p>The database architecture is designed with self-healing tables and automatic version migrations. Existing databases automatically receive missing columns upon server startup without manual SQL execution.</p>
+
+  <table class="avoid-break">
+    <thead>
+      <tr>
+        <th style="width: 20%;">Table Name</th>
+        <th style="width: 30%;">Primary Keys &amp; Indexes</th>
+        <th>Purpose &amp; Key Columns</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="code-pill">users</span></td>
+        <td><span class="code-pill">id</span> (PK), <span class="code-pill">uq_users_phone</span>, <span class="code-pill">uq_users_name</span></td>
+        <td>Stores administrator and executive profiles, password hashes, role, active status, personal Zoom links, and last login time.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">leads</span></td>
+        <td><span class="code-pill">id</span> (PK), <span class="code-pill">uq_leads_mobile</span>, <span class="code-pill">idx_leads_inbox</span></td>
+        <td>Core client repository. Tracks executive assignment, status (NEW, INTERESTED, etc.), remark history, webinar progress, account opening status, import source, and inbox date.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">calls</span></td>
+        <td><span class="code-pill">id</span> (PK), <span class="code-pill">idx_calls_lead</span>, <span class="code-pill">idx_calls_exec</span></td>
+        <td>Call interaction records. Tracks start timestamp, hangup timestamp, total duration in seconds, call outcome, and executive remarks.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">activity_log</span></td>
+        <td><span class="code-pill">id</span> (PK), <span class="code-pill">idx_act_user</span>, <span class="code-pill">idx_act_created</span></td>
+        <td>Audit log recording user actions, IP addresses, user agents, lead edits, client reassignments, imports, and password updates.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">attendance</span></td>
+        <td><span class="code-pill">id</span> (PK), <span class="code-pill">uq_att(user_id, date)</span></td>
+        <td>Daily work attendance ledger. Stores status (PRESENT, ABSENT, LEAVE, HALF_DAY), first login time, last seen time, and admin remarks.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">trusted_devices</span></td>
+        <td><span class="code-pill">id</span> (PK), <span class="code-pill">uq_dev(user_id, hash)</span></td>
+        <td>Authorized hardware and browser fingerprint whitelist for bypassing repetitive OTP authentication.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">login_otps</span></td>
+        <td><span class="code-pill">id</span> (PK), <span class="code-pill">idx_otp_user</span></td>
+        <td>Tracks 6-digit verification codes, expiration timestamps (10-minute TTL), device hashes, and attempt counters.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">lead_shares</span></td>
+        <td><span class="code-pill">id</span> (PK), <span class="code-pill">idx_share_lead</span>, <span class="code-pill">idx_share_to</span></td>
+        <td>Audit history of internal lead transfers between executives, including transfer timestamps and sender handover notes.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Real-Time SQL Triggers</h3>
+  <p>To ensure phpMyAdmin and raw database queries reflect readable data without complex joins, four active database triggers maintain real-time copies of executive names across tables:</p>
+  <ul>
+    <li><span class="code-pill">trg_leads_exec_name_ins</span>: Automatically sets <span class="code-pill">leads.executive_name</span> on INSERT based on <span class="code-pill">leads.executive_id</span>.</li>
+    <li><span class="code-pill">trg_leads_exec_name_upd</span>: Updates <span class="code-pill">leads.executive_name</span> whenever a lead is reassigned to another executive.</li>
+    <li><span class="code-pill">trg_calls_exec_name_ins</span>: Automatically records <span class="code-pill">calls.executive_name</span> when a new call record is initiated.</li>
+    <li><span class="code-pill">trg_users_name_upd</span>: Propagates executive name updates across all historical leads and calls if an executive is renamed in Admin panel.</li>
+  </ul>
+
+  <!-- SECTION 4 -->
+  <h2><span class="num">4</span> Production Environment Configuration Reference (<span class="code-pill">server/.env</span>)</h2>
+  <table class="avoid-break">
+    <thead>
+      <tr>
+        <th style="width: 25%;">Variable</th>
+        <th style="width: 25%;">Recommended Setting</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="code-pill">DB_HOST</span></td>
+        <td><span class="code-pill">localhost</span></td>
+        <td>cPanel MySQL host address (use localhost on BigRock servers).</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">DB_PORT</span></td>
+        <td><span class="code-pill">3306</span></td>
+        <td>Default MySQL port.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">DB_USER</span></td>
+        <td><span class="code-pill">cpaneluser_crmuser</span></td>
+        <td>cPanel database user with ALL PRIVILEGES granted on the database.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">DB_PASSWORD</span></td>
+        <td><span class="code-pill">********</span></td>
+        <td>Strong password generated via cPanel Password Generator.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">DB_NAME</span></td>
+        <td><span class="code-pill">cpaneluser_crm</span></td>
+        <td>Database name created in cPanel MySQL Databases.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">PORT</span></td>
+        <td><span class="code-pill">5000</span></td>
+        <td>Application port (Passenger binds automatically via environment socket).</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">JWT_SECRET</span></td>
+        <td><span class="code-pill">[random 64-char string]</span></td>
+        <td>Cryptographic secret key for signing user authentication tokens.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">APP_TZ</span></td>
+        <td><span class="code-pill">Asia/Kolkata</span></td>
+        <td>Application time zone for distribution cutoff and attendance.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">OTP_MODE</span></td>
+        <td><span class="code-pill">admin</span> (or <span class="code-pill">sms</span> / <span class="code-pill">both</span>)</td>
+        <td>OTP verification method for newly registered hardware devices.</td>
+      </tr>
+      <tr>
+        <td><span class="code-pill">DISTRIBUTION_CUTOFF_HOUR</span></td>
+        <td><span class="code-pill">12</span></td>
+        <td>Daily hour threshold (12:00 PM) for absent executive lead rebalancing.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="footer-note">
+    WealthFund Calling CRM — Technical Architecture &amp; Deployment Specification Document &bull; Generated for BigRock cPanel Integration
+  </div>
+
+</body>
+</html>
