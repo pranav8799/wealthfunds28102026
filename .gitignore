@@ -1,5 +1,9 @@
-﻿node_modules/
+node_modules/
 .env
-dist/
+client/dist/
 *.log
 *.zip
+
+# Track server/dist so cPanel has the compiled frontend ready-to-serve
+!server/dist/
+!server/dist/**

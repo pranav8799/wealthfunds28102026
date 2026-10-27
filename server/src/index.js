@@ -26,8 +26,15 @@ const imports = require('./routes/imports');
 app.use('/api/import', requireAuth, requireAdmin, imports);
 
 // Serve the built React app in production
-const dist = path.join(__dirname, '..', '..', 'client', 'dist');
-if (fs.existsSync(dist)) {
+const distCandidates = [
+  path.join(__dirname, '..', '..', 'client', 'dist'),
+  path.join(__dirname, '..', 'dist'),
+  path.join(__dirname, '..', '..', 'dist'),
+  path.join(__dirname, '..', 'public'),
+];
+const dist = distCandidates.find((d) => fs.existsSync(d) && fs.existsSync(path.join(d, 'index.html')));
+if (dist) {
+  console.log(`[Production] Serving static client build from: ${dist}`);
   app.use(express.static(dist));
   app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
 }

@@ -98,13 +98,28 @@ const db = {
 
   // Creates the database + all tables if they do not exist, and the first admin login.
   async init() {
+    // 1. Try to create database if not exists (works on local XAMPP / root).
+    // On cPanel shared hosting, database is pre-created in cPanel UI and user lacks global CREATE privilege.
     try {
       const c = await mysql.createConnection({ host: DB.host, port: DB.port, user: DB.user, password: DB.password });
-      await c.query(`CREATE DATABASE IF NOT EXISTS \`${DB.name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+      try {
+        await c.query(`CREATE DATABASE IF NOT EXISTS \`${DB.name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+      } catch (createErr) {
+        // Ignored if user lacks global CREATE privilege (cPanel)
+      }
       await c.end();
     } catch (e) {
-      const hint = e.code === 'ECONNREFUSED' ? 'MySQL is not running. Open XAMPP Control Panel and click Start next to MySQL.'
-        : e.code === 'ER_ACCESS_DENIED_ERROR' ? 'Wrong MySQL user/password. Check DB_USER and DB_PASSWORD in server/.env (XAMPP default: root with empty password).' : e.message;
+      // Connecting without a database name may be disallowed on some hosts; continue to test the pool directly
+    }
+
+    // 2. Test pool connection to verify DB exists and credentials are correct
+    try {
+      const conn = await pool.getConnection();
+      conn.release();
+    } catch (e) {
+      const hint = e.code === 'ECONNREFUSED' ? 'MySQL is not running.'
+        : (e.code === 'ER_ACCESS_DENIED_ERROR' || e.code === 'ER_DBACCESS_DENIED_ERROR') ? 'Wrong MySQL user, password, or database name. Check DB_USER, DB_PASSWORD, and DB_NAME in server/.env.'
+        : (e.code === 'ER_BAD_DB_ERROR') ? `Database '${DB.name}' does not exist. Please create it first in cPanel MySQL Databases.` : e.message;
       throw new Error(`Cannot connect to MySQL at ${DB.host}:${DB.port} — ${hint}`);
     }
     for (const ddl of SCHEMA) await pool.query(ddl);
