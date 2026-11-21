@@ -48,6 +48,38 @@ const NAV = {
   ],
 };
 
+// Top bar: callbacks that are due and demos (trials) that end soon / have just ended. Refreshes every minute, pops a message when something new appears.
+function AlertBar({ base }) {
+  const toast = useToast();
+  const [a, setA] = useState(null);
+  const prev = useState({ cur: null })[0];
+  useEffect(() => {
+    const get = () => api.get('/leads/alerts/summary').then((r) => {
+      setA(r.data);
+      const p = prev.cur;
+      if (p) {
+        if (r.data.trial_ending > p.trial_ending) toast(`⏱ ${r.data.trial_ending - p.trial_ending} demo(s) ending within 24 hours`);
+        if (r.data.trial_over > p.trial_over) toast(`○ ${r.data.trial_over - p.trial_over} demo(s) just ended — follow up now`);
+        if (r.data.callbacks_due > p.callbacks_due) toast(`↻ ${r.data.callbacks_due - p.callbacks_due} callback(s) are due`);
+      }
+      prev.cur = r.data;
+    }).catch(() => {});
+    get();
+    const t = setInterval(get, 60000);
+    return () => clearInterval(t);
+  }, [toast, prev]);
+  if (!a || (!a.callbacks_due && !a.trial_ending && !a.trial_over)) return null;
+  const chip = 'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold';
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber/40 bg-amber-tint px-3 py-2">
+      <span className="text-xs font-extrabold uppercase tracking-wider text-amber-dark">Alerts</span>
+      {a.callbacks_due > 0 && <NavLink to={`${base}/clients?followup=due`} className={`${chip} bg-white text-amber-dark hover:brightness-95`}>↻ {a.callbacks_due} callback{a.callbacks_due > 1 ? 's' : ''} due</NavLink>}
+      {a.trial_ending > 0 && <NavLink to={`${base}/clients?status=TRIAL_ENDING`} className={`${chip} bg-white text-sky hover:brightness-95`}>⏱ {a.trial_ending} demo{a.trial_ending > 1 ? 's' : ''} ending soon{a.ending?.[0] ? ` — ${a.ending[0].name}` : ''}</NavLink>}
+      {a.trial_over > 0 && <NavLink to={`${base}/clients?status=TRIAL_EXPIRED`} className={`${chip} bg-white text-coral hover:brightness-95`}>○ {a.trial_over} demo{a.trial_over > 1 ? 's' : ''} ended — follow up</NavLink>}
+    </div>
+  );
+}
+
 function Shell({ panel }) {
   const { user, logout } = useAuth();
   const { call } = useDialer();
@@ -159,6 +191,7 @@ function Shell({ panel }) {
 
       <main className="mx-auto w-full min-w-0 max-w-[1400px] flex-1 px-4 py-6 sm:px-7 lg:px-10 lg:py-9">
         {callBtn && <div className="-mt-3 mb-4 hidden items-center justify-end lg:flex">{callBtn}</div>}
+        <AlertBar base={admin ? '/admin' : '/executive'} />
         <Outlet />
       </main>
       {pw && <AccountModal initialTab={pw} onClose={() => setPw(false)} />}

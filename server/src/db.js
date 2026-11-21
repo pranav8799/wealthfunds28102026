@@ -41,6 +41,19 @@ const MIGRATIONS = [
   ['users', 'zoom_link', 'VARCHAR(500) NULL'],
   ['leads', 'executive_name', 'VARCHAR(120) NULL AFTER executive_id'],
   ['calls', 'executive_name', 'VARCHAR(120) NULL AFTER executive_id'],
+  // v3: trial counter, sold-by name, encrypted password, names next to every user id, OTP details
+  ['leads', 'trial_count', 'INT UNSIGNED NOT NULL DEFAULT 0'],
+  ['leads', 'sold_by_name', 'VARCHAR(120) NULL'],
+  ['users', 'password_enc', 'VARCHAR(400) NULL AFTER password_hash'],
+  ['attendance', 'user_name', 'VARCHAR(120) NULL AFTER user_id'],
+  ['trusted_devices', 'user_name', 'VARCHAR(120) NULL AFTER user_id'],
+  ['lead_shares', 'from_user_name', 'VARCHAR(120) NULL AFTER from_user_id'],
+  ['lead_shares', 'to_user_name', 'VARCHAR(120) NULL AFTER to_user_id'],
+  ['login_otps', 'user_name', 'VARCHAR(120) NULL AFTER user_id'],
+  ['login_otps', 'user_role', 'VARCHAR(20) NULL AFTER user_name'],
+  ['login_otps', 'user_phone', 'VARCHAR(20) NULL AFTER user_role'],
+  ['login_otps', 'status', "VARCHAR(20) NOT NULL DEFAULT 'PENDING'"],
+  ['login_otps', 'verified_at', 'DATETIME(3) NULL'],
 ];
 async function migrate() {
   for (const [table, col, ddl] of MIGRATIONS) {
@@ -64,6 +77,18 @@ async function migrate() {
   }
   await pool.query('UPDATE leads l JOIN users u ON u.id=l.executive_id SET l.executive_name=u.name WHERE l.executive_name IS NULL OR l.executive_name<>u.name');
   await pool.query('UPDATE calls c JOIN users u ON u.id=c.executive_id SET c.executive_name=u.name WHERE c.executive_name IS NULL OR c.executive_name<>u.name');
+  // names / roles next to every user id (fills the old rows once; triggers keep new rows right)
+  const sync = [
+    'UPDATE leads l JOIN users u ON u.id=l.sold_by SET l.sold_by_name=u.name WHERE l.sold_by_name IS NULL OR l.sold_by_name<>u.name',
+    'UPDATE attendance a JOIN users u ON u.id=a.user_id SET a.user_name=u.name WHERE a.user_name IS NULL OR a.user_name<>u.name',
+    'UPDATE trusted_devices d JOIN users u ON u.id=d.user_id SET d.user_name=u.name WHERE d.user_name IS NULL OR d.user_name<>u.name',
+    'UPDATE lead_shares s JOIN users u ON u.id=s.from_user_id SET s.from_user_name=u.name WHERE s.from_user_name IS NULL OR s.from_user_name<>u.name',
+    'UPDATE lead_shares s JOIN users u ON u.id=s.to_user_id SET s.to_user_name=u.name WHERE s.to_user_name IS NULL OR s.to_user_name<>u.name',
+    'UPDATE login_otps o JOIN users u ON u.id=o.user_id SET o.user_name=u.name, o.user_role=u.role, o.user_phone=u.phone WHERE o.user_name IS NULL OR o.user_role IS NULL OR o.user_phone IS NULL',
+    "UPDATE login_otps SET status='EXPIRED', code_plain=NULL WHERE status='PENDING' AND expires_at < UTC_TIMESTAMP(3)",
+    'UPDATE leads SET trial_count=1 WHERE trial_count=0 AND trial_ends_at IS NOT NULL',
+  ];
+  for (const q of sync) { try { await pool.query(q); } catch (e) { console.warn('Database sync skipped:', e.message); } }
 }
 
 // The old separate import tables (import_batches / import_sources) are retired: clients live only in `leads`,
@@ -127,8 +152,9 @@ const db = {
     try { await retireImportTables(); } catch (e) { console.warn('Could not remove the old import tables:', e.message); }
     const { c } = await db.one('SELECT COUNT(*) c FROM users');
     if (c === 0) {
-      await db.run('INSERT INTO users (name, phone, password_hash, role) VALUES (?,?,?,?)',
-        ['Admin', '9999999999', bcrypt.hashSync('admin123', 10), 'admin']);
+      const { encryptSecret } = require('./util');
+      await db.run('INSERT INTO users (name, phone, password_hash, password_enc, role) VALUES (?,?,?,?,?)',
+        ['Admin', '9999999999', bcrypt.hashSync('admin123', 10), encryptSecret('admin123'), 'admin']);
       console.log('First run: admin created -> mobile 9999999999 / password admin123 (change it after login)');
     }
   },

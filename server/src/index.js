@@ -85,6 +85,20 @@ initWithRetry().then(() => {
   share();
   setInterval(share, 60_000).unref();
 
+  // Housekeeping every minute:
+  //  * a demo / trial that has run out moves the client from Trial to Follow-up (Not active), so it shows up for a follow-up call
+  //  * login OTPs that were never used are marked EXPIRED (and their code is wiped)
+  const housekeeping = async () => {
+    try {
+      const now = new Date().toISOString();
+      const r = await db.run("UPDATE leads SET status='FOLLOWUP', followup_at = COALESCE(followup_at, trial_ends_at) WHERE status='TRIAL' AND trial_ends_at IS NOT NULL AND trial_ends_at < ?", [now]);
+      if (r.affectedRows) console.log(`[Trial] ${r.affectedRows} trial(s) finished -> moved to Follow-up`);
+      await db.run("UPDATE login_otps SET status='EXPIRED', code_plain=NULL WHERE status='PENDING' AND expires_at < ?", [now]);
+    } catch (e) { if (!DB_DOWN.includes(e.code)) console.warn('Housekeeping error:', e.message); }
+  };
+  housekeeping();
+  setInterval(housekeeping, 60_000).unref();
+
   // Auto-import new rows from saved Google Sheets (silently skipped while MySQL is down)
   if (SYNC_MINUTES > 0) {
     setInterval(async () => {

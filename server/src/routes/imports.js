@@ -5,7 +5,7 @@ const db = require('../db');
 const sources = require('../sheetSources');
 const { wrap, nowIso } = require('../util');
 const { logActivity } = require('../activity');
-const { parseFile, fetchSheet, guessMapping, importRows, httpError } = require('../importer');
+const { parseFile, fetchSheet, guessMapping, detectOld, oldPreview, importRows, httpError } = require('../importer');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -24,29 +24,50 @@ router.post('/preview', upload.single('file'), wrap(async (req, res) => {
 
   const importId = crypto.randomUUID();
   pending.set(importId, { ...parsed, url, label: req.file?.originalname || 'Google Sheet', expires: Date.now() + 10 * 60_000 });
+  const mapping = guessMapping(parsed.columns, parsed.rows);
+  // OLD data (has an executive column and / or NP - NI - link results)? then show who owns what and the sorted status
+  let old = null;
+  const det = await detectOld(parsed.rows, parsed.columns, mapping.phoneCol);
+  if (det.isOld && mapping.phoneCol) old = await oldPreview(parsed.rows, parsed.columns, mapping.nameCol, mapping.phoneCol, det);
   res.json({
     importId,
     columns: parsed.columns,
     sample: parsed.rows.slice(0, 5),
     total: parsed.rows.length,
-    mapping: guessMapping(parsed.columns),
+    mapping,
     fromUrl: !!url,
+    old,
   });
 }));
 
+// Admin changed the Name / Mobile column in the preview -> recompute the old-data summary
+router.post('/old-preview', wrap(async (req, res) => {
+  const p = pending.get(req.body.importId);
+  if (!p) throw httpError(400, 'Preview expired — please select the file again');
+  const { nameCol, phoneCol } = req.body;
+  if (!nameCol || !phoneCol || !p.columns.includes(nameCol) || !p.columns.includes(phoneCol)) return res.json({ old: null });
+  const det = await detectOld(p.rows, p.columns, phoneCol);
+  res.json({ old: det.isOld ? await oldPreview(p.rows, p.columns, nameCol, phoneCol, det) : null });
+}));
+
 router.post('/commit', wrap(async (req, res) => {
-  const { importId, nameCol, phoneCol, autoSync } = req.body;
+  const { importId, nameCol, phoneCol, autoSync, importAs, execMap } = req.body;
   const p = pending.get(importId);
   if (!p) throw httpError(400, 'Preview expired — please select the file again');
   if (!nameCol || !phoneCol || !p.columns.includes(nameCol) || !p.columns.includes(phoneCol))
     throw httpError(400, 'Choose the Name and Mobile columns');
   const source = p.url ? 'google-sheet' : 'file';
-  const result = await importRows(p.rows, nameCol, phoneCol, source, p.label);
+  // importAs: 'old' (keep executive + NP/NI/link status)  |  'new' (everything fresh). Default = what the file looks like.
+  let opts = {};
+  const det = await detectOld(p.rows, p.columns, phoneCol);
+  if (det.isOld && importAs !== 'new') opts = { old: { ...det, execMap: execMap || {} } };
+  const result = await importRows(p.rows, nameCol, phoneCol, source, p.label, opts);
   if (p.url) {
     sources.upsert({ label: p.label.slice(0, 250), url: p.url, name_col: nameCol, phone_col: phoneCol,
       auto_sync: autoSync ? 1 : 0, last_synced_at: nowIso(), last_result: result });
   }
-  await logActivity(req, 'IMPORT', `Imported "${p.label}" — ${result.added} new, ${result.duplicates} duplicate, ${result.invalid} invalid (of ${result.total})`,
+  const oldTxt = result.old ? ` [OLD data → ${Object.entries(result.byExec).map(([k, v]) => `${k}: ${v}`).join(', ') || 'no executive'}; Not pickup ${result.byStatus.NO_ANSWER}, Not interested ${result.byStatus.NOT_INTERESTED}, Interested ${result.byStatus.INTERESTED}]` : '';
+  await logActivity(req, 'IMPORT', `Imported "${p.label}" — ${result.added} new, ${result.duplicates} duplicate, ${result.invalid} invalid (of ${result.total})${oldTxt}`,
     { details: { ...result, label: p.label, source } });
   pending.delete(importId);
   res.json(result);

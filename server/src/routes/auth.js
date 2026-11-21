@@ -2,7 +2,7 @@ const router = require('express').Router();
 const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { sign, requireAuth } = require('../auth');
-const { wrap, nowIso } = require('../util');
+const { wrap, nowIso, encryptSecret } = require('../util');
 const { logActivity } = require('../activity');
 
 const crypto = require('crypto');
@@ -67,9 +67,11 @@ router.post('/login', wrap(async (req, res) => {
   const code = String(crypto.randomInt(100000, 1000000));
   const toAdmin = OTP_MODE === 'admin' || OTP_MODE === 'both';
   const bySms = OTP_MODE === 'sms' || OTP_MODE === 'both';
-  await db.run('UPDATE login_otps SET used=1 WHERE user_id=? AND used=0', [user.id]);   // only the newest OTP works
-  const info = await db.run('INSERT INTO login_otps (user_id, device_hash, device_label, code_hash, code_plain, expires_at) VALUES (?,?,?,?,?,?)',
-    [user.id, dev, deviceLabel(req), sha(code), toAdmin ? code : null, new Date(Date.now() + OTP_TTL_MIN * 60_000).toISOString()]);
+  await db.run("UPDATE login_otps SET used=1, status='EXPIRED', code_plain=NULL WHERE user_id=? AND used=0", [user.id]);   // only the newest OTP works
+  const info = await db.run(
+    'INSERT INTO login_otps (user_id, user_name, user_role, user_phone, device_hash, device_label, code_hash, code_plain, status, expires_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [user.id, user.name, user.role, user.phone, dev, deviceLabel(req), sha(code), toAdmin ? code : null, 'PENDING', new Date(Date.now() + OTP_TTL_MIN * 60_000).toISOString()]
+  );
   let sent = false;
   if (bySms) {
     try { await sendOtpSms(phone, code); sent = true; } catch (e) { console.warn('OTP SMS failed:', e.message); if (!toAdmin) return res.status(502).json({ message: 'Could not send the OTP SMS. Contact admin.' }); }
@@ -83,8 +85,14 @@ router.post('/verify-otp', wrap(async (req, res) => {
   const otp = await db.one('SELECT * FROM login_otps WHERE id=?', [Number(req.body.challenge_id) || 0]);
   const deviceId = String(req.body.device_id || '');
   if (!otp || otp.used || deviceId.length < 16 || otp.device_hash !== sha(deviceId)) return res.status(400).json({ message: 'OTP expired. Sign in again to get a new one.' });
-  if (Date.parse(otp.expires_at) < Date.now()) return res.status(400).json({ message: 'OTP expired. Sign in again to get a new one.' });
-  if (otp.attempts >= 5) return res.status(429).json({ message: 'Too many wrong attempts. Sign in again to get a new OTP.' });
+  if (Date.parse(otp.expires_at) < Date.now()) {
+    await db.run("UPDATE login_otps SET status='EXPIRED', code_plain=NULL WHERE id=?", [otp.id]);
+    return res.status(400).json({ message: 'OTP expired. Sign in again to get a new one.' });
+  }
+  if (otp.attempts >= 5) {
+    await db.run("UPDATE login_otps SET status='FAILED', code_plain=NULL WHERE id=?", [otp.id]);
+    return res.status(429).json({ message: 'Too many wrong attempts. Sign in again to get a new OTP.' });
+  }
   const user = await db.one('SELECT * FROM users WHERE id=?', [otp.user_id]);
   if (!user || !user.active) return res.status(403).json({ message: 'Your account is disabled. Contact admin.' });
   if (otp.code_hash !== sha(String(req.body.code || '').replace(/\D/g, ''))) {
@@ -92,7 +100,7 @@ router.post('/verify-otp', wrap(async (req, res) => {
     await logActivity(req, 'LOGIN_FAILED', 'Wrong OTP entered', { user });
     return res.status(400).json({ message: `Wrong OTP (${4 - otp.attempts} tries left)` });
   }
-  await db.run('UPDATE login_otps SET used=1, code_plain=NULL WHERE id=?', [otp.id]);
+  await db.run("UPDATE login_otps SET used=1, status='VERIFIED', verified_at=?, code_plain=NULL WHERE id=?", [nowIso(), otp.id]);
   await db.run(`INSERT INTO trusted_devices (user_id, device_hash, label, ip, last_used_at) VALUES (?,?,?,?,?)
     ON DUPLICATE KEY UPDATE last_used_at=VALUES(last_used_at), ip=VALUES(ip)`, [user.id, otp.device_hash, deviceLabel(req), ipOf(req), nowIso()]);
   await logActivity(req, 'DEVICE_TRUSTED', 'OTP verified — this device will not ask for an OTP again', { user, details: { device: deviceLabel(req) } });
@@ -101,7 +109,7 @@ router.post('/verify-otp', wrap(async (req, res) => {
 
 // Admin (OTP_MODE=admin): OTPs waiting to be told to the executives
 router.get('/otp/pending', requireAuth, requireAdmin, wrap(async (req, res) => {
-  res.json(await db.all(`SELECT o.id, o.code_plain AS code, o.expires_at, o.created_at, o.device_label, u.name, u.phone
+  res.json(await db.all(`SELECT o.id, o.user_id, o.user_name, o.code_plain AS code, o.status, o.expires_at, o.created_at, o.device_label, u.name, u.phone
     FROM login_otps o JOIN users u ON u.id=o.user_id
     WHERE o.used=0 AND o.code_plain IS NOT NULL AND o.expires_at > ? ORDER BY o.id DESC LIMIT 30`, [nowIso()]));
 }));
@@ -118,7 +126,7 @@ router.post('/change-password', requireAuth, wrap(async (req, res) => {
   if (!newPassword || newPassword.length < 6) return res.status(400).json({ message: 'New password must be at least 6 characters' });
   const u = await db.one('SELECT * FROM users WHERE id=?', [req.user.id]);
   if (!bcrypt.compareSync(String(oldPassword || ''), u.password_hash)) return res.status(400).json({ message: 'Current password is wrong' });
-  await db.run('UPDATE users SET password_hash=? WHERE id=?', [bcrypt.hashSync(newPassword, 10), u.id]);
+  await db.run('UPDATE users SET password_hash=?, password_enc=? WHERE id=?', [bcrypt.hashSync(newPassword, 10), encryptSecret(newPassword), u.id]);
   await logActivity(req, 'PASSWORD_CHANGED', 'Changed own password');
   res.json({ ok: true });
 }));

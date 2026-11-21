@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
-import { label } from '../utils';
+import { label, STATUS_META } from '../utils';
 
 const BADGE = {
   NEW: 'bg-surface-2 text-ink-500',
   INTERESTED: 'bg-signal-greenTint text-signal-greenDark',
   NOT_INTERESTED: 'bg-coral-tint text-coral',
   CALLBACK: 'bg-amber-tint text-amber-dark',
+  TRIAL: 'bg-sky-tint text-sky',
+  FOLLOWUP: 'bg-violet-50 text-violet-700',
+  ACTIVE: 'bg-signal-greenTint text-signal-greenDark',
+  NOT_ACTIVE: 'bg-surface-2 text-ink-500',
+  DONE_SOLD: 'bg-emerald-50 text-emerald-800',
   NO_ANSWER: 'bg-sky-tint text-sky',
   OPENED: 'bg-signal-greenTint text-signal-greenDark',
   IN_PROGRESS: 'bg-amber-tint text-amber-dark',
@@ -16,13 +21,25 @@ const BADGE = {
   PENDING: 'bg-surface-2 text-ink-500',
   YES: 'bg-signal-greenTint text-signal-greenDark',
   NO: 'bg-surface-2 text-ink-500',
+  VERIFIED: 'bg-signal-greenTint text-signal-greenDark',
+  EXPIRED: 'bg-coral-tint text-coral',
+  FAILED: 'bg-coral-tint text-coral',
 };
 
-export function Badge({ value }) {
+/** Compact professional status badge with icon + tooltip */
+export function Badge({ value, compact = false }) {
   if (!value) return <span className="text-[#a9b0c6]">—</span>;
+  const meta = STATUS_META[value];
+  const cls = BADGE[value] || BADGE.NEW;
+  const text = meta?.label || label(value);
+  const icon = meta?.icon || '';
   return (
-    <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${BADGE[value] || BADGE.NEW}`}>
-      {label(value)}
+    <span
+      title={text}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${cls}`}
+    >
+      {icon && <span className="text-[11px] leading-none" aria-hidden>{icon}</span>}
+      {!compact && <span>{text}</span>}
     </span>
   );
 }

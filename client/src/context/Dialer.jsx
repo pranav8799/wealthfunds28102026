@@ -4,7 +4,7 @@ import api, { errMsg } from '../api';
 import { useAuth } from './Auth';
 import { useToast } from './Toast';
 import { Modal, PhoneIcon } from '../components/ui';
-import { fmtClock, fmtDuration, fmtDateTime, OUTCOMES, WEBINAR, ACCOUNT, label, toLocalInput, isMobileDevice, renderTemplate, waUrl, withGroupLink } from '../utils';
+import { fmtClock, fmtDuration, fmtDateTime, OUTCOMES, WEBINAR, ACCOUNT, TRIAL_PRESETS, label, toLocalInput, isMobileDevice, renderTemplate, waUrl, withGroupLink } from '../utils';
 
 const DialerCtx = createContext(null);
 export const useDialer = () => useContext(DialerCtx);
@@ -231,13 +231,17 @@ function WrapUp({ call, duration, onSave }) {
   const [outcome, setOutcome] = useState('');
   const [remark, setRemark] = useState('');
   const [followup, setFollowup] = useState(toLocalInput(tomorrow));
+  const [trialDays, setTrialDays] = useState(3);
+  const [customDays, setCustomDays] = useState('');
+  const [trialEnd, setTrialEnd] = useState('');      // optional: pick the trial end date & time instead of a number of days
+  const [review, setReview] = useState('');          // optional: follow-up date during the trial (default = when the trial ends)
   const [group, setGroup] = useState(!!call.group_joined);
   const [webinar, setWebinar] = useState(call.webinar_status);
   const [account, setAccount] = useState(call.account_status);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // WhatsApp message to the client, chosen by the call result (Interested / Not interested / Call back / No answer)
+  // WhatsApp message to the client, chosen by the call result
   const [tpl, setTpl] = useState(null);               // { templates, vars }
   const [sendWa, setSendWa] = useState(true);
   const [msg, setMsg] = useState('');
@@ -249,8 +253,10 @@ function WrapUp({ call, duration, onSave }) {
   useEffect(() => {
     if (msgEdited) return;
     if (!tpl || !outcome) { setMsg(''); return; }
+    // Map new outcomes to closest existing WA templates when dedicated ones are missing
+    const tplKey = (outcome === 'TRIAL' || outcome === 'FOLLOWUP' || outcome === 'DONE_SOLD') ? 'INTERESTED' : outcome;
     const cb = followup && !Number.isNaN(Date.parse(followup)) ? fmtDateTime(new Date(followup).toISOString()) : 'the time we agreed';
-    setMsg(renderTemplate(withGroupLink(tpl.templates[outcome], tpl.vars.group_link, tpl.group_all !== false), { ...tpl.vars, name: call.lead_name, callback_time: cb }));
+    setMsg(renderTemplate(withGroupLink(tpl.templates[tplKey] || tpl.templates.INTERESTED || '', tpl.vars.group_link, tpl.group_all !== false), { ...tpl.vars, name: call.lead_name, callback_time: cb }));
   }, [tpl, outcome, followup, msgEdited, call.lead_name]);
   async function saveZoom() {
     try {
@@ -271,7 +277,20 @@ function WrapUp({ call, duration, onSave }) {
     const form = { group_joined: group, webinar_status: webinar, account_status: account };
     if (outcome) form.outcome = outcome;
     if (remark.trim()) form.remark = remark.trim();
-    if (outcome === 'CALLBACK') form.followup_at = new Date(followup).toISOString();
+    if (outcome === 'CALLBACK' || outcome === 'FOLLOWUP') {
+      form.followup_at = new Date(followup).toISOString();
+    }
+    if (outcome === 'TRIAL') {
+      if (trialEnd) {
+        if (Date.parse(trialEnd) <= Date.now() + 60000) { setErr('The trial end date must be in the future'); return; }
+        form.trial_ends_at = new Date(trialEnd).toISOString();
+      } else {
+        const days = customDays ? Number(customDays) : trialDays;
+        if (!days || days < 1 || days > 90) { setErr('Enter a valid trial duration (1–90 days)'); return; }
+        form.trial_days = days;
+      }
+      if (review) form.followup_at = new Date(review).toISOString();
+    }
     let wa = null;
     if (outcome && sendWa && msg.trim()) {
       // the window must be opened right here (inside the click) or the browser blocks it; it is pointed to WhatsApp after the save
@@ -299,15 +318,76 @@ function WrapUp({ call, duration, onSave }) {
 
         <div>
           <span className="label">What did the client say? <span className="normal-case">(optional)</span></span>
-          <div className="grid grid-cols-2 gap-2">
-            {OUTCOMES.map((o) => (
-              <button type="button" key={o.value} onClick={() => setOutcome(outcome === o.value ? '' : o.value)}
-                className={`rounded-md border-2 px-3 py-2.5 text-sm font-bold transition ${outcome === o.value ? o.cls : 'border-border-subtle bg-white text-ink-500 hover:border-border-strong'}`}>
-                {o.label}
-              </button>
-            ))}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {OUTCOMES.filter((o) => o.value !== 'TRIAL').map((o) => {
+              // Trial is not a separate button any more: it is an option that appears only after "Interested"
+              const on = outcome === o.value || (o.value === 'INTERESTED' && outcome === 'TRIAL');
+              return (
+                <button type="button" key={o.value} onClick={() => setOutcome(on ? '' : o.value)}
+                  className={`rounded-md border-2 px-2.5 py-2 text-sm font-bold transition ${on ? o.cls : 'border-border-subtle bg-white text-ink-500 hover:border-border-strong'}`}>
+                  <span className="mr-1">{o.icon}</span>{o.label}
+                </button>
+              );
+            })}
           </div>
         </div>
+
+        {(outcome === 'INTERESTED' || outcome === 'TRIAL') && (
+          <label className="flex cursor-pointer items-center gap-2 rounded-md border border-sky bg-sky-tint/40 px-3 py-2.5 text-sm font-bold text-sky">
+            <input type="checkbox" checked={outcome === 'TRIAL'} onChange={(e) => setOutcome(e.target.checked ? 'TRIAL' : 'INTERESTED')} />
+            ⏱ Also give a Trial / Demo to this client <span className="font-normal text-ink-500">(optional)</span>
+          </label>
+        )}
+
+        {(outcome === 'CALLBACK' || outcome === 'FOLLOWUP') && (
+          <div>
+            <label className="label" htmlFor="fu">{outcome === 'CALLBACK' ? 'Callback date & time' : 'Follow-up date & time'}</label>
+            <input id="fu" type="datetime-local" className="input" value={followup} onChange={(e) => setFollowup(e.target.value)} required />
+          </div>
+        )}
+
+        {outcome === 'TRIAL' && (() => {
+          const days = customDays ? Number(customDays) : trialDays;
+          const endsAt = trialEnd ? new Date(trialEnd) : (days >= 1 && days <= 90 ? new Date(Date.now() + days * 86400000) : null);
+          return (
+            <div className="space-y-3 rounded-md border border-sky bg-sky-tint/40 p-3">
+              <div>
+                <label className="label !mb-1">Demo / trial length</label>
+                <div className="flex flex-wrap gap-2">
+                  {TRIAL_PRESETS.map((d) => (
+                    <button type="button" key={d} onClick={() => { setTrialDays(d); setCustomDays(''); setTrialEnd(''); }}
+                      className={`rounded-md border-2 px-3 py-1.5 text-sm font-bold ${!trialEnd && !customDays && trialDays === d ? 'border-sky bg-sky-tint text-sky' : 'border-border-subtle bg-white text-ink-600'}`}>
+                      {d} days
+                    </button>
+                  ))}
+                  <input type="number" min={1} max={90} placeholder="Other days" className="input !w-28 !py-1.5"
+                    value={customDays} onChange={(e) => { setCustomDays(e.target.value); setTrialEnd(''); }} />
+                </div>
+              </div>
+              <div>
+                <label className="label" htmlFor="tr-end">…or pick the end date &amp; time</label>
+                <input id="tr-end" type="datetime-local" className="input" value={trialEnd} onChange={(e) => { setTrialEnd(e.target.value); if (e.target.value) setCustomDays(''); }} />
+              </div>
+              {endsAt && (
+                <div className="rounded-md bg-white px-3 py-2 text-sm">
+                  <span className="rounded-full bg-signal-greenTint px-2 py-0.5 text-xs font-bold text-signal-greenDark">● Active</span>{' '}
+                  until <b>{fmtDateTime(endsAt.toISOString())}</b>. After that the client becomes <b>Not active</b> and moves to <b>Follow-up</b>.
+                </div>
+              )}
+              <div>
+                <label className="label" htmlFor="fu-trial">Follow-up date during the trial <span className="normal-case">(optional)</span></label>
+                <input id="fu-trial" type="datetime-local" className="input" value={review} onChange={(e) => setReview(e.target.value)} />
+                <p className="mt-1 text-[11px] text-ink-400">Leave empty = follow-up when the trial ends. A "trial ending" alert is shown to you automatically. Account is activated only after Done (purchase).</p>
+              </div>
+            </div>
+          );
+        })()}
+
+        {outcome === 'DONE_SOLD' && (
+          <p className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            ★ Purchase confirmed. Client moves to <b>Done</b> and the account is activated. Executives can view but not edit Done clients.
+          </p>
+        )}
 
         <div>
           <label className="label" htmlFor="remark">Remark <span className="normal-case">(optional)</span></label>
@@ -315,13 +395,6 @@ function WrapUp({ call, duration, onSave }) {
           <textarea id="remark" className="input min-h-[80px] resize-y" value={remark} onChange={(e) => setRemark(e.target.value)}
             placeholder={call.lead_remark ? 'Add a new remark only if something changed…' : 'Type what the client said…'} />
         </div>
-
-        {outcome === 'CALLBACK' && (
-          <div>
-            <label className="label" htmlFor="fu">Call back on</label>
-            <input id="fu" type="datetime-local" className="input" value={followup} onChange={(e) => setFollowup(e.target.value)} />
-          </div>
-        )}
 
         {outcome && (
           <div className="rounded-md border border-border-subtle bg-surface-0 p-3">
@@ -331,7 +404,7 @@ function WrapUp({ call, duration, onSave }) {
             </label>
             {sendWa && (
               <>
-                {outcome === 'INTERESTED' && tpl && !tpl.vars.zoom_link && (
+                {(outcome === 'INTERESTED' || outcome === 'TRIAL') && tpl && !tpl.vars.zoom_link && (
                   <div className="mt-2 rounded-md bg-amber-tint px-3 py-2">
                     <div className="text-xs font-semibold text-amber-dark">Your Zoom link is not saved yet — the message will go without it. Paste it once and it is used for all your clients:</div>
                     <div className="mt-1.5 flex gap-2">

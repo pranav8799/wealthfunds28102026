@@ -27,11 +27,56 @@ export const label = (v) => String(v || '').replace(/_/g, ' ');
 export const CHART_COLORS = ['#12b886', '#3b82f6', '#e8a83c', '#8b5cf6', '#e5484d', '#06b6d4', '#64748b', '#ec4899'];
 
 export const OUTCOMES = [
-  { value: 'INTERESTED', label: 'Interested', cls: 'border-signal-green bg-signal-greenTint text-signal-greenDark' },
-  { value: 'NOT_INTERESTED', label: 'Not interested', cls: 'border-coral bg-coral-tint text-coral' },
-  { value: 'CALLBACK', label: 'Call back later', cls: 'border-amber bg-amber-tint text-amber-dark' },
-  { value: 'NO_ANSWER', label: 'No answer / busy', cls: 'border-ink-500 bg-surface-2 text-ink-700' },
+  { value: 'INTERESTED', label: 'Interested', icon: '✓', cls: 'border-signal-green bg-signal-greenTint text-signal-greenDark' },
+  { value: 'NOT_INTERESTED', label: 'Not interested', icon: '✕', cls: 'border-coral bg-coral-tint text-coral' },
+  { value: 'CALLBACK', label: 'Callback', icon: '↻', cls: 'border-amber bg-amber-tint text-amber-dark' },
+  { value: 'TRIAL', label: 'Trial', icon: '⏱', cls: 'border-sky bg-sky-tint text-sky' },
+  { value: 'FOLLOWUP', label: 'Follow-up', icon: '📋', cls: 'border-violet-500 bg-violet-50 text-violet-700' },
+  { value: 'DONE_SOLD', label: 'Done', icon: '★', cls: 'border-emerald-600 bg-emerald-50 text-emerald-800' },
+  { value: 'NO_ANSWER', label: 'No answer / busy', icon: '○', cls: 'border-ink-500 bg-surface-2 text-ink-700' },
 ];
+
+// All client status sections (tabs / filters) — short labels for single-row chips
+export const STATUSES = [
+  { value: 'INTERESTED', label: 'Interested', icon: '✓', tone: 'green' },
+  { value: 'NOT_INTERESTED', label: 'Not Int.', icon: '✕', tone: 'coral' },
+  { value: 'CALLBACK', label: 'Callback', icon: '↻', tone: 'amber' },
+  { value: 'TRIAL', label: 'Trial', icon: '⏱', tone: 'sky' },
+  { value: 'FOLLOWUP', label: 'Follow-up', icon: '📋', tone: 'violet' },
+  { value: 'ACTIVE', label: 'Active', icon: '●', tone: 'green' },
+  { value: 'NOT_ACTIVE', label: 'Not Active', icon: '○', tone: 'slate' },
+  { value: 'DONE_SOLD', label: 'Done', icon: '★', tone: 'emerald' },
+];
+
+export const TRIAL_PRESETS = [2, 3, 5, 8];
+
+export const STATUS_META = {
+  NEW: { label: 'New', icon: '•', cls: 'border-ink-400 bg-surface-2 text-ink-600' },
+  INTERESTED: { label: 'Interested', icon: '✓', cls: 'border-signal-green bg-signal-greenTint text-signal-greenDark' },
+  NOT_INTERESTED: { label: 'Not Interested', icon: '✕', cls: 'border-coral bg-coral-tint text-coral' },
+  CALLBACK: { label: 'Callback', icon: '↻', cls: 'border-amber bg-amber-tint text-amber-dark' },
+  TRIAL: { label: 'Trial', icon: '⏱', cls: 'border-sky bg-sky-tint text-sky' },
+  FOLLOWUP: { label: 'Follow-up', icon: '📋', cls: 'border-violet-500 bg-violet-50 text-violet-700' },
+  ACTIVE: { label: 'Active', icon: '●', cls: 'border-signal-green bg-signal-greenTint text-signal-greenDark' },
+  NOT_ACTIVE: { label: 'Not Active', icon: '○', cls: 'border-ink-400 bg-surface-2 text-ink-500' },
+  DONE_SOLD: { label: 'Done', icon: '★', cls: 'border-emerald-600 bg-emerald-50 text-emerald-800' },
+  NO_ANSWER: { label: 'No Answer', icon: '○', cls: 'border-ink-400 bg-surface-2 text-ink-600' },
+};
+
+// Demo / trial state of a client: Active (running, with time left) or Not active (finished)
+export function trialInfo(c) {
+  if (!c || !c.trial_ends_at) return null;
+  const end = Date.parse(c.trial_ends_at); const ms = end - Date.now();
+  const abs = Math.abs(ms), d = Math.floor(abs / 86400000), h = Math.floor((abs % 86400000) / 3600000), m = Math.floor((abs % 3600000) / 60000);
+  const span = d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+  const demo = c.trial_count > 1 ? `Demo #${c.trial_count}` : 'Demo';
+  const ends = new Date(end).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true });
+  if (c.status === 'DONE_SOLD') return { state: 'DONE', demo, ends, line: `${demo} · bought` };
+  return ms >= 0
+    ? { state: 'ACTIVE', demo, ends, left: `${span} left`, soon: ms <= 2 * 86400000, line: `${demo} ends ${ends}` }
+    : { state: 'NOT_ACTIVE', demo, ends, left: `ended ${span} ago`, soon: false, line: `${demo} ended ${ends}` };
+}
+
 export const WEBINAR = ['PENDING', 'REGISTERED', 'ATTENDED', 'NOT_ATTENDED'];
 export const ACCOUNT = ['NOT_OPENED', 'IN_PROGRESS', 'OPENED'];
 

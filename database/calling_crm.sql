@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
   name VARCHAR(120) NOT NULL,
   phone VARCHAR(20) NOT NULL,
   password_hash VARCHAR(100) NOT NULL,
+  password_enc VARCHAR(400) NULL,                    -- the password, AES-256 encrypted (admin can reveal it in Executives; never plain text)
   role ENUM('admin','executive') NOT NULL DEFAULT 'executive',
   active TINYINT(1) NOT NULL DEFAULT 1,
   zoom_link VARCHAR(500) NULL,                       -- this executive's own Zoom link (used in his WhatsApp messages)
@@ -28,7 +29,7 @@ CREATE TABLE IF NOT EXISTS leads (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   name VARCHAR(160) NOT NULL,
   mobile VARCHAR(20) NOT NULL,
-  status VARCHAR(20) NOT NULL DEFAULT 'NEW',
+  status VARCHAR(30) NOT NULL DEFAULT 'NEW',
   executive_id INT UNSIGNED NULL,
   executive_name VARCHAR(120) NULL,                  -- copy of users.name, kept in sync by triggers (readable in phpMyAdmin)
   remark TEXT NULL,
@@ -39,6 +40,13 @@ CREATE TABLE IF NOT EXISTS leads (
   followup_at DATETIME(3) NULL,
   last_called_at DATETIME(3) NULL,
   interested_at DATETIME(3) NULL,                    -- when the client was marked Interested (starts the 10-day account-opening window)
+  trial_days INT UNSIGNED NULL,                     -- custom trial duration in days (2/3/5/8 or any)
+  trial_started_at DATETIME(3) NULL,
+  trial_ends_at DATETIME(3) NULL,
+  sold_at DATETIME(3) NULL,                         -- when marked Done/Sold (purchase confirmed)
+  sold_by INT UNSIGNED NULL,
+  sold_by_name VARCHAR(120) NULL,                    -- name of the executive who closed the sale (kept in sync by triggers)
+  trial_count INT UNSIGNED NOT NULL DEFAULT 0,       -- how many demos / trials this client has had (1st, 2nd …)
   source VARCHAR(30) NOT NULL DEFAULT 'manual',      -- manual | file | google-sheet
   import_label VARCHAR(255) NULL,                    -- file name / sheet it was imported from
   extra LONGTEXT NULL,
@@ -54,6 +62,8 @@ CREATE TABLE IF NOT EXISTS leads (
   KEY idx_leads_status (status),
   KEY idx_leads_created (created_at),
   KEY idx_leads_inbox (call_count, executive_id, inbox_date),
+  KEY idx_leads_followup (status, followup_at),
+  KEY idx_leads_trial (trial_ends_at),
   CONSTRAINT fk_leads_exec FOREIGN KEY (executive_id) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -100,6 +110,7 @@ CREATE TABLE IF NOT EXISTS activity_log (
 CREATE TABLE IF NOT EXISTS attendance (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id INT UNSIGNED NOT NULL,
+  user_name VARCHAR(120) NULL,                       -- executive name next to the id (triggers keep it in sync)
   work_date DATE NOT NULL,
   status VARCHAR(12) NOT NULL DEFAULT 'PRESENT',
   first_login_at DATETIME(3) NULL,
@@ -115,6 +126,7 @@ CREATE TABLE IF NOT EXISTS attendance (
 CREATE TABLE IF NOT EXISTS trusted_devices (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id INT UNSIGNED NOT NULL,
+  user_name VARCHAR(120) NULL,                       -- executive name next to the id (triggers keep it in sync)
   device_hash CHAR(64) NOT NULL,
   label VARCHAR(255) NULL,
   ip VARCHAR(64) NULL,
@@ -128,13 +140,18 @@ CREATE TABLE IF NOT EXISTS trusted_devices (
 CREATE TABLE IF NOT EXISTS login_otps (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id INT UNSIGNED NOT NULL,
+  user_name VARCHAR(120) NULL,                       -- executive / admin name (filled by trigger + app)
+  user_role VARCHAR(20) NULL,                        -- executive | admin
+  user_phone VARCHAR(20) NULL,                       -- login mobile number
   device_hash CHAR(64) NOT NULL,
   device_label VARCHAR(255) NULL,
   code_hash CHAR(64) NOT NULL,
-  code_plain VARCHAR(8) NULL,
+  code_plain VARCHAR(8) NULL,                        -- cleared after use / expiry
   attempts INT NOT NULL DEFAULT 0,
   used TINYINT(1) NOT NULL DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING',     -- PENDING | VERIFIED | EXPIRED | FAILED
   expires_at DATETIME(3) NOT NULL,
+  verified_at DATETIME(3) NULL,                      -- when the OTP was entered correctly
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   KEY idx_otp_user (user_id, created_at),
@@ -145,7 +162,9 @@ CREATE TABLE IF NOT EXISTS lead_shares (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   lead_id INT UNSIGNED NOT NULL,
   from_user_id INT UNSIGNED NULL,
+  from_user_name VARCHAR(120) NULL,
   to_user_id INT UNSIGNED NOT NULL,
+  to_user_name VARCHAR(120) NULL,
   note VARCHAR(300) NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
@@ -165,24 +184,50 @@ CREATE TABLE IF NOT EXISTS settings (
 DELIMITER $$
 DROP TRIGGER IF EXISTS trg_leads_exec_name_ins$$
 CREATE TRIGGER trg_leads_exec_name_ins BEFORE INSERT ON leads FOR EACH ROW
-  SET NEW.executive_name = (SELECT name FROM users WHERE id = NEW.executive_id)$$
+  SET NEW.executive_name = (SELECT name FROM users WHERE id = NEW.executive_id),
+      NEW.sold_by_name = (SELECT name FROM users WHERE id = NEW.sold_by)$$
 DROP TRIGGER IF EXISTS trg_leads_exec_name_upd$$
 CREATE TRIGGER trg_leads_exec_name_upd BEFORE UPDATE ON leads FOR EACH ROW
-  SET NEW.executive_name = (SELECT name FROM users WHERE id = NEW.executive_id)$$
+  SET NEW.executive_name = (SELECT name FROM users WHERE id = NEW.executive_id),
+      NEW.sold_by_name = (SELECT name FROM users WHERE id = NEW.sold_by)$$
 DROP TRIGGER IF EXISTS trg_calls_exec_name_ins$$
 CREATE TRIGGER trg_calls_exec_name_ins BEFORE INSERT ON calls FOR EACH ROW
   SET NEW.executive_name = (SELECT name FROM users WHERE id = NEW.executive_id)$$
+DROP TRIGGER IF EXISTS trg_attendance_name_ins$$
+CREATE TRIGGER trg_attendance_name_ins BEFORE INSERT ON attendance FOR EACH ROW
+  SET NEW.user_name = (SELECT name FROM users WHERE id = NEW.user_id)$$
+DROP TRIGGER IF EXISTS trg_devices_name_ins$$
+CREATE TRIGGER trg_devices_name_ins BEFORE INSERT ON trusted_devices FOR EACH ROW
+  SET NEW.user_name = (SELECT name FROM users WHERE id = NEW.user_id)$$
+DROP TRIGGER IF EXISTS trg_shares_name_ins$$
+CREATE TRIGGER trg_shares_name_ins BEFORE INSERT ON lead_shares FOR EACH ROW
+  SET NEW.from_user_name = (SELECT name FROM users WHERE id = NEW.from_user_id),
+      NEW.to_user_name = (SELECT name FROM users WHERE id = NEW.to_user_id)$$
+DROP TRIGGER IF EXISTS trg_otps_name_ins$$
+CREATE TRIGGER trg_otps_name_ins BEFORE INSERT ON login_otps FOR EACH ROW
+  SET NEW.user_name = (SELECT name FROM users WHERE id = NEW.user_id),
+      NEW.user_role = (SELECT role FROM users WHERE id = NEW.user_id),
+      NEW.user_phone = (SELECT phone FROM users WHERE id = NEW.user_id)$$
 DROP TRIGGER IF EXISTS trg_users_name_upd$$
 CREATE TRIGGER trg_users_name_upd AFTER UPDATE ON users FOR EACH ROW
   BEGIN
     IF NEW.name <> OLD.name THEN
       UPDATE leads SET executive_name = NEW.name WHERE executive_id = NEW.id;
+      UPDATE leads SET sold_by_name = NEW.name WHERE sold_by = NEW.id;
       UPDATE calls SET executive_name = NEW.name WHERE executive_id = NEW.id;
+      UPDATE attendance SET user_name = NEW.name WHERE user_id = NEW.id;
+      UPDATE trusted_devices SET user_name = NEW.name WHERE user_id = NEW.id;
+      UPDATE lead_shares SET from_user_name = NEW.name WHERE from_user_id = NEW.id;
+      UPDATE lead_shares SET to_user_name = NEW.name WHERE to_user_id = NEW.id;
+      UPDATE login_otps SET user_name = NEW.name WHERE user_id = NEW.id;
+    END IF;
+    IF NEW.phone <> OLD.phone THEN
+      UPDATE login_otps SET user_phone = NEW.phone WHERE user_id = NEW.id;
     END IF;
   END$$
 DELIMITER ;
 
 -- First admin (change the mobile number and password after login: sidebar -> Account settings)
 INSERT INTO users (name, phone, password_hash, role)
-SELECT 'Admin', '9999999999', '$2a$10$4R/QiRJKfsbP.LLRkXXwA.K8smclY5EpRfx6nbowPmQ37ueCbHuAW', 'admin' FROM DUAL
+SELECT 'Admin', '9999999999', '$2a$10$0LwnHe38bH8exU76cZXNR.bOZKS4l71519oeDujrgJ6YjgUI5fofu', 'admin' FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM users);

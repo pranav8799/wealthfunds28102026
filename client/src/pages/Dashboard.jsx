@@ -44,8 +44,8 @@ export default function Dashboard() {
           <Kpi label="Calls today (team)" value={d.calls.today} hint={`${d.calls.connected_today} connected · ${fmtDuration(d.calls.talk_sec_today)} talk`} />
           <Kpi label="Follow-ups due" value={d.followupsDue} tone={d.followupsDue ? 'red' : undefined} />
           <Kpi label="Interested" value={L.interested} tone="green" />
-          <Kpi label="Not interested" value={L.not_interested} />
-          <Kpi label={`Reached ${d.minCalls}+ calls`} value={L.reached_min} hint={`target: ${d.minCalls} attempts per client`} />
+          <Kpi label="Trial" value={L.trial} hint={`${L.trial_ending || 0} ending · ${L.trial_expired || 0} expired`} />
+          <Kpi label="Done" value={L.done_sold} tone="green" />
           <Kpi label="Accounts opened" value={L.accounts_opened} tone="green" hint={`${L.accounts_progress} in progress`} />
         </section>
       ) : (
@@ -55,11 +55,43 @@ export default function Dashboard() {
           <Kpi label="Follow-ups due" value={d.followupsDue} tone={d.followupsDue ? 'red' : undefined} />
           <Kpi label="My clients" value={L.total} />
           <Kpi label="Interested" value={L.interested} tone="green" />
-          <Kpi label="Not interested" value={L.not_interested} />
-          <Kpi label={`Reached ${d.minCalls}+ calls`} value={L.reached_min} />
+          <Kpi label="Trial" value={L.trial} hint={`${L.trial_ending || 0} ending · ${L.trial_expired || 0} expired`} />
+          <Kpi label="Done" value={L.done_sold} tone="green" />
           <Kpi label="Accounts opened" value={L.accounts_opened} tone="green" hint={`${L.accounts_progress} in progress`} />
         </section>
       )}
+
+      {/* Trial & callback alerts */}
+      {((d.trialsEnding && d.trialsEnding.length) || (d.trialsExpired && d.trialsExpired.length)) ? (
+        <section className="mb-6 grid gap-4 lg:grid-cols-2">
+          {d.trialsEnding?.length > 0 && (
+            <div className="card border-amber bg-amber-tint/30 p-4">
+              <h3 className="mb-2 text-sm font-bold text-amber-dark">⏱ Trial Ending</h3>
+              <ul className="space-y-1.5 text-sm">
+                {d.trialsEnding.map((t) => (
+                  <li key={t.id} className="flex justify-between gap-2">
+                    <span className="font-medium">{t.name}</span>
+                    <span className="mono-num text-xs text-ink-500">{fmtDateTime(t.trial_ends_at)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {d.trialsExpired?.length > 0 && (
+            <div className="card border-coral bg-coral-tint/30 p-4">
+              <h3 className="mb-2 text-sm font-bold text-coral">⏱ Trial Expired</h3>
+              <ul className="space-y-1.5 text-sm">
+                {d.trialsExpired.map((t) => (
+                  <li key={t.id} className="flex justify-between gap-2">
+                    <span className="font-medium">{t.name}</span>
+                    <span className="mono-num text-xs text-ink-500">{fmtDateTime(t.trial_ends_at)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      ) : null}
 
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
         <section className="card p-5">

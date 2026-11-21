@@ -12,6 +12,7 @@ export default function Executives() {
   const [users, setUsers] = useState(null);
   const [edit, setEdit] = useState(null); // {} = new, user = reset
   const [devs, setDevs] = useState(null);  // user whose verified devices are shown
+  const [pw, setPw] = useState(null);      // user whose stored password is shown
   const load = useCallback(() => api.get('/users').then((r) => setUsers(r.data)).catch((e) => toast(errMsg(e), 'err')), [toast]);
   useEffect(() => { load(); }, [load]);
 
@@ -43,6 +44,7 @@ export default function Executives() {
                     <td className="td whitespace-nowrap">{fmtDateTime(u.last_activity_at)}</td>
                     <td className="td whitespace-nowrap">
                       <Link to={`${base}/activity?user=${u.id}`} className="btn-ghost !px-3 !py-1.5">Activity</Link>{' '}
+                      <button className="btn-ghost !px-3 !py-1.5" onClick={() => setPw(u)} title="Show the saved password">🔑 Password</button>{' '}
                       <button className="btn-ghost !px-3 !py-1.5" onClick={() => setEdit(u)}>Edit / reset password</button>{' '}
                       {u.id !== user.id && <button className="btn-ghost !px-3 !py-1.5" onClick={() => toggle(u)}>{u.active ? 'Disable' : 'Enable'}</button>}
                     </td>
@@ -53,9 +55,27 @@ export default function Executives() {
           </div>
         )}
       </section>
+      {pw && <PasswordModal u={pw} onClose={() => setPw(null)} />}
       {devs && <DevicesModal u={devs} onClose={() => { setDevs(null); load(); }} />}
       {edit && <UserModal u={edit} onClose={() => setEdit(null)} onDone={() => { setEdit(null); load(); }} />}
     </>
+  );
+}
+
+// Admin only: the password is stored AES-encrypted (login uses the bcrypt hash). Every view is written to the Activity Log.
+function PasswordModal({ u, onClose }) {
+  const [state, setState] = useState({ loading: true });
+  useEffect(() => { api.get(`/users/${u.id}/password`).then((r) => setState({ pw: r.data.password, msg: r.data.message })).catch((e) => setState({ err: errMsg(e) })); }, [u.id]);
+  return (
+    <Modal title={`${u.name} — password`} onClose={onClose}>
+      {state.loading ? <Spinner /> : state.err ? <div className="rounded-md bg-coral-tint px-3 py-2 text-sm text-coral">{state.err}</div> : state.pw ? (
+        <div className="space-y-2">
+          <div className="text-xs text-ink-500">Login mobile: <b className="mono-num">{u.phone}</b></div>
+          <div className="mono-num select-all rounded-md bg-surface-0 px-4 py-3 text-center font-display text-2xl font-bold tracking-wider">{state.pw}</div>
+          <p className="text-xs text-ink-300">This view is recorded in the Activity Log.</p>
+        </div>
+      ) : <div className="rounded-md bg-amber-tint px-3 py-2 text-sm text-amber-dark">{state.msg || 'Password not stored yet.'}</div>}
+    </Modal>
   );
 }
 

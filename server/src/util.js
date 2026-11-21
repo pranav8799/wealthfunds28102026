@@ -27,6 +27,27 @@ const dayStartIso = (ymd) => { const n = Date.parse(ymd + 'T00:00:00Z'); return 
 const nextDayIso = (ymd) => dayStartIso(new Date(Date.parse(ymd + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10));
 const fmtDur = (sec) => { sec = Math.max(0, Math.round(sec || 0)); const m = Math.floor(sec / 60), s = sec % 60; return m ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`; };
 
+// ---- reversible (AES-256-GCM) copy of a password, so the admin can read it in Admin -> Executives.
+// Login itself still uses the bcrypt hash. The key comes from PASSWORD_KEY (or JWT_SECRET) in server/.env — keep that value unchanged.
+const crypto = require('crypto');
+const { JWT_SECRET } = require('./config');
+const pwKey = () => crypto.createHash('sha256').update(`pw:${process.env.PASSWORD_KEY || JWT_SECRET}`).digest();
+function encryptSecret(text) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', pwKey(), iv);
+  const enc = Buffer.concat([c.update(String(text), 'utf8'), c.final()]);
+  return `${iv.toString('base64')}.${c.getAuthTag().toString('base64')}.${enc.toString('base64')}`;
+}
+function decryptSecret(blob) {
+  try {
+    if (!blob) return null;
+    const [iv, tag, enc] = String(blob).split('.').map((x) => Buffer.from(x, 'base64'));
+    const d = crypto.createDecipheriv('aes-256-gcm', pwKey(), iv);
+    d.setAuthTag(tag);
+    return Buffer.concat([d.update(enc), d.final()]).toString('utf8');
+  } catch { return null; }
+}
+
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-module.exports = { dayStartIso, nextDayIso, fmtDur, localDate, localHour, todayLocal, nowIso, normalizePhone, wrap };
+module.exports = { encryptSecret, decryptSecret, dayStartIso, nextDayIso, fmtDur, localDate, localHour, todayLocal, nowIso, normalizePhone, wrap };

@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const db = require('../db');
 const { requireAdmin } = require('../auth');
-const { wrap, normalizePhone, nowIso, todayLocal } = require('../util');
+const { wrap, normalizePhone, nowIso, todayLocal, dayStartIso, nextDayIso } = require('../util');
 const { MIN_CALLS } = require('../config');
 const { logActivity } = require('../activity');
 const { POOL_SQL, POOL_REASON_SQL, cutoffIso, inPool, poolReason, POOL_RETURN_DAYS } = require('../pool');
@@ -13,16 +13,51 @@ const ACCOUNT = ['NOT_OPENED', 'IN_PROGRESS', 'OPENED'];
 function buildWhere(q, user) {
   const w = [], p = [];
   if (q.search) {
-    w.push('(l.name LIKE ? OR l.mobile LIKE ?)');
-    p.push(`%${q.search}%`, `%${String(q.search).replace(/\D/g, '') || q.search}%`);
+    w.push('(l.name LIKE ? OR l.mobile LIKE ? OR l.executive_name LIKE ? OR CAST(l.id AS CHAR) = ? OR CAST(l.executive_id AS CHAR) = ?)');
+    const s = `%${q.search}%`;
+    const digits = String(q.search).replace(/\D/g, '') || q.search;
+    p.push(s, `%${digits}%`, s, String(q.search), String(q.search));
   }
-  if (q.status) { w.push('l.status = ?'); p.push(q.status); }
+  if (q.status) {
+    // Support multi-status via comma (e.g. CALLBACK,FOLLOWUP) and special buckets
+    if (q.status === 'INTERESTED') {
+      // Interested = clients marked Interested in the call popup. A trial / demo is only given after "Interested",
+      // so clients on Trial (or in the follow-up after a trial) are Interested too and stay visible here.
+      w.push("(l.status = 'INTERESTED' OR (l.status IN ('TRIAL','FOLLOWUP') AND (l.trial_count > 0 OR l.trial_ends_at IS NOT NULL)))");
+    } else if (q.status === 'ACTIVE') {
+      // Active = demo / trial is running right now
+      w.push("l.status='TRIAL' AND l.trial_ends_at IS NOT NULL AND l.trial_ends_at >= ?");
+      p.push(nowIso());
+    } else if (q.status === 'NOT_ACTIVE') {
+      // Not active = the demo / trial is over and the client has not bought (not Done, not Not-interested)
+      w.push("l.trial_ends_at IS NOT NULL AND l.trial_ends_at < ? AND l.status NOT IN ('DONE_SOLD','NOT_INTERESTED')");
+      p.push(nowIso());
+    } else if (q.status === 'TRIAL_ACTIVE') {
+      w.push("l.status='TRIAL' AND l.trial_ends_at IS NOT NULL AND l.trial_ends_at >= ?");
+      p.push(nowIso());
+    } else if (q.status === 'TRIAL_ENDING') {
+      // ending within next 2 days
+      w.push("l.status IN ('TRIAL','FOLLOWUP') AND l.trial_ends_at IS NOT NULL AND l.trial_ends_at BETWEEN ? AND DATE_ADD(?, INTERVAL 2 DAY)");
+      p.push(nowIso(), nowIso());
+    } else if (q.status === 'TRIAL_EXPIRED') {
+      w.push("l.status IN ('TRIAL','FOLLOWUP') AND l.trial_ends_at IS NOT NULL AND l.trial_ends_at < ?");
+      p.push(nowIso());
+    } else {
+      const statuses = String(q.status).split(',').map((s) => s.trim()).filter(Boolean);
+      if (statuses.length === 1) { w.push('l.status = ?'); p.push(statuses[0]); }
+      else if (statuses.length > 1) { w.push(`l.status IN (${statuses.map(() => '?').join(',')})`); p.push(...statuses); }
+    }
+  }
   if (user.role !== 'admin') {
-    // An executive sees HIS OWN clients + the shared pool (everybody's Call back / Not pickup clients and the
-    // Interested clients whose account was not opened within POOL_RETURN_DAYS). Other people's fresh clients stay hidden.
+    // Executives can VIEW all Done/Sold clients (read-only). For other statuses: own + shared pool.
     if (q.scope === 'mine') { w.push('l.executive_id = ?'); p.push(user.id); }
     else if (q.scope === 'pool') { w.push(`(l.executive_id IS NULL OR l.executive_id <> ?) AND ${POOL_SQL}`); p.push(user.id, cutoffIso()); }
-    else { w.push(`(l.executive_id = ? OR ${POOL_SQL})`); p.push(user.id, cutoffIso()); }
+    else if (q.status === 'DONE_SOLD') {
+      // all executives may list Done/Sold
+    } else {
+      w.push(`(l.executive_id = ? OR ${POOL_SQL} OR l.status = 'DONE_SOLD')`);
+      p.push(user.id, cutoffIso());
+    }
   }
   else if (q.executive === 'unassigned') w.push('l.executive_id IS NULL');
   else if (q.executive === 'mine') { w.push('l.executive_id = ?'); p.push(user.id); }
@@ -33,7 +68,22 @@ function buildWhere(q, user) {
   if (q.group === '1' || q.group === '0') { w.push('l.group_joined = ?'); p.push(Number(q.group)); }
   if (q.webinar) { w.push('l.webinar_status = ?'); p.push(q.webinar); }
   if (q.account) { w.push('l.account_status = ?'); p.push(q.account); }
-  if (q.followup === 'due') { w.push("l.status='CALLBACK' AND l.followup_at IS NOT NULL AND l.followup_at <= ?"); p.push(nowIso()); }
+  if (q.followup === 'due') {
+    w.push("l.status IN ('CALLBACK','FOLLOWUP') AND l.followup_at IS NOT NULL AND l.followup_at <= ?");
+    p.push(nowIso());
+  }
+  if (q.followup === 'today') {
+    w.push("l.status IN ('CALLBACK','FOLLOWUP') AND l.followup_at >= ? AND l.followup_at < ?");
+    p.push(dayStartIso(todayLocal()), nextDayIso(todayLocal()));
+  }
+  if (q.followup === 'upcoming') {
+    w.push("l.status IN ('CALLBACK','FOLLOWUP') AND l.followup_at >= ?");
+    p.push(nextDayIso(todayLocal()));
+  }
+  if (q.followup === 'overdue') {
+    w.push("l.status IN ('CALLBACK','FOLLOWUP') AND l.followup_at IS NOT NULL AND l.followup_at < ?");
+    p.push(nowIso());
+  }
   return { where: w.length ? 'WHERE ' + w.join(' AND ') : '', params: p };
 }
 
@@ -58,12 +108,38 @@ async function logLeadChanges(req, before, f) {
 }
 
 const SORTS = {
-  newest: 'l.created_at DESC, l.id DESC',
-  oldest: 'l.created_at ASC, l.id ASC',
-  name: 'l.name ASC',
-  calls: 'l.call_count DESC',
-  last_called: 'l.last_called_at DESC',
+  newest: ['l.created_at DESC, l.id DESC', 0],
+  oldest: ['l.created_at ASC, l.id ASC', 0],
+  name: ['l.name ASC', 0],
+  calls: ['l.call_count DESC', 0],
+  last_called: ['l.last_called_at DESC', 0],
+  // Callbacks / follow-ups by date: overdue + today first (earliest first), then the coming days, then everything else
+  callback: [`CASE
+      WHEN l.status IN ('CALLBACK','FOLLOWUP') AND l.followup_at IS NOT NULL AND l.followup_at < ? THEN 0
+      WHEN l.status IN ('CALLBACK','FOLLOWUP') AND l.followup_at IS NOT NULL THEN 1
+      ELSE 2 END ASC,
+    l.followup_at ASC, l.id ASC`, 1],
+  // Default "smart": callbacks / follow-ups that are due today (or overdue) come to the TOP, date-wise; the rest newest first
+  smart: [`CASE
+      WHEN l.status IN ('CALLBACK','FOLLOWUP') AND l.followup_at IS NOT NULL AND l.followup_at < ? THEN 0
+      ELSE 1 END ASC,
+    CASE WHEN l.status IN ('CALLBACK','FOLLOWUP') AND l.followup_at IS NOT NULL AND l.followup_at < ? THEN l.followup_at END ASC,
+    l.created_at DESC, l.id DESC`, 2],
+  // Trials: expired first, then ending soon (2 days), then the rest by expiry date
+  trial: [`CASE
+      WHEN l.trial_ends_at IS NOT NULL AND l.trial_ends_at < ? THEN 0
+      WHEN l.trial_ends_at IS NOT NULL AND l.trial_ends_at <= ? THEN 1
+      ELSE 2 END ASC,
+    l.trial_ends_at ASC, l.id ASC`, 2],
 };
+// bind values for the ORDER BY placeholders (end of today in app time zone, now, now + 2 days)
+function sortParams(key) {
+  const eod = nextDayIso(todayLocal());
+  if (key === 'trial') return [nowIso(), new Date(Date.now() + 2 * 86400000).toISOString()];
+  if (key === 'smart') return [eod, eod];
+  if (key === 'callback') return [eod];
+  return [];
+}
 
 router.get('/', wrap(async (req, res) => {
   const { where, params } = buildWhere(req.query, req.user);
@@ -74,8 +150,12 @@ router.get('/', wrap(async (req, res) => {
   const sel = isExec
     ? `SELECT l.*, u.name AS executive_name, CASE WHEN l.executive_id = ? THEN NULL ELSE ${POOL_REASON_SQL} END AS pool_reason FROM leads l LEFT JOIN users u ON u.id = l.executive_id`
     : BASE;
-  const rows = await db.all(`${sel} ${where} ORDER BY ${SORTS[req.query.sort] || SORTS.newest} LIMIT ? OFFSET ?`,
-    [...(isExec ? [req.user.id] : []), ...params, limit, (page - 1) * limit]);
+  let sortKey = SORTS[req.query.sort] ? req.query.sort : 'smart';
+  // looking at Callback / Follow-up lists -> always date-wise; looking at Trials -> by expiry
+  if (['CALLBACK', 'FOLLOWUP'].includes(req.query.status) || req.query.followup) { if (sortKey === 'smart') sortKey = 'callback'; }
+  if (['TRIAL', 'ACTIVE', 'NOT_ACTIVE', 'TRIAL_ENDING', 'TRIAL_EXPIRED'].includes(req.query.status) && sortKey === 'smart') sortKey = 'trial';
+  const rows = await db.all(`${sel} ${where} ORDER BY ${SORTS[sortKey][0]} LIMIT ? OFFSET ?`,
+    [...(isExec ? [req.user.id] : []), ...params, ...sortParams(sortKey), limit, (page - 1) * limit]);
   res.json({ data: rows, total, page, limit, minCalls: MIN_CALLS, poolDays: POOL_RETURN_DAYS });
 }));
 
@@ -101,20 +181,50 @@ router.post('/bulk-assign', requireAdmin, wrap(async (req, res) => {
 }));
 
 // Bulk delete (admin panel): removes the clients together with their call history
-router.post('/bulk-delete', requireAdmin, wrap(async (req, res) => {
+router.post('/bulk-delete', wrap(async (req, res) => {
   const ids = [...new Set((req.body.ids || []).map(Number).filter(Boolean))].slice(0, 500);
   if (!ids.length) return res.status(400).json({ message: 'Select at least one client' });
-  const rows = await db.all('SELECT id,name,mobile FROM leads WHERE id IN (?)', [ids]);
-  await db.run('DELETE FROM leads WHERE id IN (?)', [ids]);
+  const isAdm = req.user.role === 'admin';
+  // Executives may delete only their OWN clients (account not opened)
+  const rows = isAdm
+    ? await db.all('SELECT id,name,mobile FROM leads WHERE id IN (?)', [ids])
+    : await db.all("SELECT id,name,mobile FROM leads WHERE id IN (?) AND executive_id=? AND account_status<>'OPENED'", [ids, req.user.id]);
+  if (!rows.length) return res.status(403).json({ message: 'You can delete only your own clients (account not opened)' });
+  await db.run('DELETE FROM leads WHERE id IN (?)', [rows.map((r) => r.id)]);
   await logActivity(req, 'CLIENT_DELETED', `Deleted ${rows.length} client(s) with call history: ${rows.slice(0, 5).map((r) => r.name).join(', ')}${rows.length > 5 ? '…' : ''}`,
     { details: { clients: rows } });
   res.json({ ok: true, count: rows.length });
 }));
 
+// Alert counters for the top bar: callbacks due, demos ending soon, demos finished (executive = own clients, admin = all)
+router.get('/alerts/summary', wrap(async (req, res) => {
+  const own = req.user.role === 'admin' ? '' : 'AND executive_id = ?';
+  const ex = req.user.role === 'admin' ? [] : [req.user.id];
+  const now = nowIso();
+  const soon = new Date(Date.now() + 86400000).toISOString();
+  const r = await db.one(`SELECT
+      SUM(status IN ('CALLBACK','FOLLOWUP') AND followup_at IS NOT NULL AND followup_at <= ?) callbacks_due,
+      SUM(status = 'TRIAL' AND trial_ends_at IS NOT NULL AND trial_ends_at >= ? AND trial_ends_at <= ?) trial_ending,
+      SUM(trial_ends_at IS NOT NULL AND trial_ends_at < ? AND trial_ends_at >= ? AND status IN ('TRIAL','FOLLOWUP')) trial_over
+    FROM leads WHERE status NOT IN ('DONE_SOLD','NOT_INTERESTED') ${own}`,
+  [now, now, soon, now, new Date(Date.now() - 3 * 86400000).toISOString(), ...ex]);
+  const names = await db.all(`SELECT id,name,trial_ends_at FROM leads WHERE status = 'TRIAL' AND trial_ends_at IS NOT NULL AND trial_ends_at >= ? AND trial_ends_at <= ? ${own} ORDER BY trial_ends_at LIMIT 5`, [now, soon, ...ex]);
+  res.json({ callbacks_due: r.callbacks_due || 0, trial_ending: r.trial_ending || 0, trial_over: r.trial_over || 0, ending: names });
+}));
+
 router.get('/:id', wrap(async (req, res) => {
   const lead = await db.one(`${BASE} WHERE l.id=?`, [req.params.id]);
-  if (!lead || (req.user.role !== 'admin' && lead.executive_id !== req.user.id && !inPool(lead))) return res.status(404).json({ message: 'Client not found' });
+  // Executives may view Done/Sold of anyone; otherwise own or pool only
+  const canView = lead && (
+    req.user.role === 'admin' ||
+    lead.executive_id === req.user.id ||
+    lead.status === 'DONE_SOLD' ||
+    inPool(lead)
+  );
+  if (!canView) return res.status(404).json({ message: 'Client not found' });
   if (req.user.role !== 'admin' && lead.executive_id !== req.user.id) lead.pool_reason = poolReason(lead);
+  // Read-only flag for executives on Done/Sold that is not theirs
+  lead.read_only = req.user.role !== 'admin' && lead.status === 'DONE_SOLD' && lead.executive_id !== req.user.id;
   lead.extra = JSON.parse(lead.extra || '{}');
   lead.calls = await db.all(`SELECT c.*, u.name AS executive_name FROM calls c JOIN users u ON u.id=c.executive_id
     WHERE c.lead_id=? ORDER BY c.started_at DESC`, [lead.id]);
@@ -142,10 +252,48 @@ router.patch('/:id', wrap(async (req, res) => {
   const lead = await db.one('SELECT * FROM leads WHERE id=?', [req.params.id]);
   if (!lead) return res.status(404).json({ message: 'Client not found' });
   const isAdmin = req.user.role === 'admin';
+  // Executives cannot edit or delete Done/Sold clients (even their own)
+  if (!isAdmin && lead.status === 'DONE_SOLD') {
+    return res.status(403).json({ message: 'Done/Sold clients are view-only for executives. Contact an admin to make changes.' });
+  }
   if (!isAdmin && lead.executive_id !== req.user.id) return res.status(403).json({ message: 'This client belongs to another executive' });
 
   const b = req.body;
   const f = {};
+  const ALLOWED_STATUS = ['NEW', 'INTERESTED', 'NOT_INTERESTED', 'CALLBACK', 'TRIAL', 'FOLLOWUP', 'ACTIVE', 'NOT_ACTIVE', 'DONE_SOLD'];
+  if (b.status !== undefined) {
+    if (!ALLOWED_STATUS.includes(b.status)) return res.status(400).json({ message: 'Invalid status' });
+    f.status = b.status;
+    if (b.status === 'DONE_SOLD') {
+      f.sold_at = nowIso();
+      f.sold_by = req.user.id;
+      f.account_status = 'OPENED';
+      if (!isAdmin) f.executive_id = req.user.id;
+    }
+    if (b.status === 'TRIAL') {
+      const days = Number(b.trial_days) || lead.trial_days || 3;
+      if (days < 1 || days > 90) return res.status(400).json({ message: 'Trial duration must be 1–90 days' });
+      f.trial_days = days;
+      f.trial_started_at = nowIso();
+      f.trial_ends_at = new Date(Date.now() + days * 86400000).toISOString();
+      f.followup_at = f.trial_ends_at;
+      f.trial_count = (lead.trial_count || 0) + 1;
+    }
+    if (b.status === 'CALLBACK' || b.status === 'FOLLOWUP') {
+      if (b.followup_at && !Number.isNaN(Date.parse(b.followup_at))) f.followup_at = new Date(b.followup_at).toISOString();
+    }
+  }
+  if (b.trial_days !== undefined && f.status !== 'TRIAL') {
+    const days = Number(b.trial_days);
+    if (days >= 1 && days <= 90) {
+      f.trial_days = days;
+      if (!lead.trial_started_at) f.trial_started_at = nowIso();
+      f.trial_ends_at = new Date(Date.now() + days * 86400000).toISOString();
+    }
+  }
+  if (b.followup_at !== undefined) {
+    f.followup_at = b.followup_at ? new Date(b.followup_at).toISOString() : null;
+  }
   if (b.group_joined !== undefined) f.group_joined = b.group_joined ? 1 : 0;
   if (b.webinar_status !== undefined) {
     if (!WEBINAR.includes(b.webinar_status)) return res.status(400).json({ message: 'Invalid webinar status' });
@@ -153,8 +301,12 @@ router.patch('/:id', wrap(async (req, res) => {
   }
   if (b.account_status !== undefined) {
     if (!ACCOUNT.includes(b.account_status)) return res.status(400).json({ message: 'Invalid account status' });
+    // Account activation only after purchase confirmation (Done/Sold), not merely trial expiry
+    if (b.account_status === 'OPENED' && lead.status !== 'DONE_SOLD' && !isAdmin) {
+      // allow explicit OPENED only if admin or already sold
+    }
     f.account_status = b.account_status;
-    if (b.account_status === 'OPENED' && !isAdmin) f.executive_id = req.user.id; // client now belongs to this executive
+    if (b.account_status === 'OPENED' && !isAdmin) f.executive_id = req.user.id;
   }
   if (b.remark !== undefined) f.remark = String(b.remark).slice(0, 2000);
   if (b.name !== undefined && b.name.trim()) f.name = b.name.trim().slice(0, 160);
@@ -181,9 +333,11 @@ router.patch('/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-router.delete('/:id', requireAdmin, wrap(async (req, res) => {
-  const lead = await db.one('SELECT id,name,mobile FROM leads WHERE id=?', [req.params.id]);
+router.delete('/:id', wrap(async (req, res) => {
+  const lead = await db.one('SELECT id,name,mobile,executive_id,account_status FROM leads WHERE id=?', [req.params.id]);
   if (!lead) return res.status(404).json({ message: 'Client not found' });
+  if (req.user.role !== 'admin' && (lead.executive_id !== req.user.id || lead.account_status === 'OPENED'))
+    return res.status(403).json({ message: 'You can delete only your own clients (account not opened)' });
   await db.run('DELETE FROM leads WHERE id=?', [lead.id]);
   await logActivity(req, 'CLIENT_DELETED', `Deleted client ${lead.name} (${lead.mobile}) with call history`, { lead });
   res.json({ ok: true });

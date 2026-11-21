@@ -5,10 +5,12 @@ const { logActivity } = require('../activity');
 const { hangupCall } = require('../hangup');
 const { inPool } = require('../pool');
 
-const OUTCOMES = ['INTERESTED', 'NOT_INTERESTED', 'CALLBACK', 'NO_ANSWER'];
-const CONNECTED = ['INTERESTED', 'NOT_INTERESTED', 'CALLBACK'];
+// Expanded outcomes: Interested, Not Interested, Callback, Trial, Follow-up, Done/Sold, No Answer
+const OUTCOMES = ['INTERESTED', 'NOT_INTERESTED', 'CALLBACK', 'TRIAL', 'FOLLOWUP', 'DONE_SOLD', 'NO_ANSWER'];
+const CONNECTED = ['INTERESTED', 'NOT_INTERESTED', 'CALLBACK', 'TRIAL', 'FOLLOWUP', 'DONE_SOLD'];
 const WEBINAR = ['PENDING', 'REGISTERED', 'ATTENDED', 'NOT_ATTENDED'];
 const ACCOUNT = ['NOT_OPENED', 'IN_PROGRESS', 'OPENED'];
+const TRIAL_PRESETS = [2, 3, 5, 8];
 
 const callWithLead = (id, exec = db) => exec.one(`
   SELECT c.*, l.name AS lead_name, l.mobile AS lead_mobile, l.status AS lead_status, l.call_count AS lead_call_count,
@@ -60,18 +62,47 @@ router.post('/:id/end', wrap(async (req, res) => {
   if (outcome && !OUTCOMES.includes(outcome)) return res.status(400).json({ message: 'Invalid call result' });
   const remark = String(b.remark || '').trim().slice(0, 2000);
   let followup = null;
-  if (outcome === 'CALLBACK') {
-    if (!b.followup_at || Number.isNaN(Date.parse(b.followup_at))) return res.status(400).json({ message: 'Select the call-back date & time' });
+  let trialDays = null;
+  let trialEnds = null;
+
+  if (outcome === 'CALLBACK' || outcome === 'FOLLOWUP') {
+    if (!b.followup_at || Number.isNaN(Date.parse(b.followup_at))) {
+      return res.status(400).json({ message: outcome === 'CALLBACK' ? 'Select the call-back date & time' : 'Select the follow-up date & time' });
+    }
     followup = new Date(b.followup_at).toISOString();
+  }
+  if (outcome === 'TRIAL') {
+    const start = new Date();
+    if (b.trial_ends_at && !Number.isNaN(Date.parse(b.trial_ends_at))) {
+      // a chosen end date & time (any date, not only 2 / 3 / 5 / 8 days)
+      const end = new Date(b.trial_ends_at).getTime();
+      if (end <= start.getTime() + 60000) return res.status(400).json({ message: 'The trial end date must be in the future' });
+      if (end > start.getTime() + 90 * 86400000) return res.status(400).json({ message: 'A trial can be at most 90 days' });
+      trialEnds = new Date(end).toISOString();
+      trialDays = Math.max(1, Math.ceil((end - start.getTime()) / 86400000));
+    } else {
+      trialDays = Number(b.trial_days) || 0;
+      if (!trialDays || trialDays < 1 || trialDays > 90) {
+        return res.status(400).json({ message: 'Select a trial duration (2, 3, 5, 8 days, a custom number of days or an end date)' });
+      }
+      trialEnds = new Date(start.getTime() + trialDays * 86400000).toISOString();
+    }
+    // When the trial is over the client moves to Follow-up automatically (see the hourly job in index.js)
+    // Optional follow-up date for the end of trial; default = trial end
+    if (b.followup_at && !Number.isNaN(Date.parse(b.followup_at))) {
+      followup = new Date(b.followup_at).toISOString();
+    } else {
+      followup = trialEnds;
+    }
   }
   if (b.webinar_status && !WEBINAR.includes(b.webinar_status)) return res.status(400).json({ message: 'Invalid webinar status' });
   if (b.account_status && !ACCOUNT.includes(b.account_status)) return res.status(400).json({ message: 'Invalid account status' });
 
-  const before = await db.one('SELECT id,name,mobile,group_joined,webinar_status,account_status,status,interested_at FROM leads WHERE id=?', [call.lead_id]);
+  const before = await db.one('SELECT id,name,mobile,group_joined,webinar_status,account_status,status,interested_at,trial_days,trial_ends_at,trial_count FROM leads WHERE id=?', [call.lead_id]);
   const lead = before;
 
   // The client did not respond / the executive entered no result on a fresh client -> straight into Call back (tomorrow 11:00),
-  // so it shows in everybody's All Clients. A client that already has a result (Interested, Not interested, Call back, Not pickup) keeps it.
+  // so it shows in everybody's All Clients. A client that already has a result keeps it.
   let autoCallback = false;
   if (!outcome && lead.status === 'NEW') {
     outcome = 'CALLBACK'; autoCallback = true;
@@ -88,15 +119,39 @@ router.post('/:id/end', wrap(async (req, res) => {
     const { c } = await t.one('SELECT COUNT(*) c FROM calls WHERE lead_id=? AND ended_at IS NOT NULL', [call.lead_id]);
     const f = { call_count: c, last_called_at: ended };
     if (outcome) {
-      f.status = outcome; f.followup_at = followup;
+      // Map outcome to lead status (TRIAL stays TRIAL; DONE_SOLD locks the client)
+      f.status = outcome;
+      f.followup_at = followup;
       // start of the 10-day "account must be opened" window; any other result clears it
       if (outcome !== 'INTERESTED') f.interested_at = null;
       else if (!lead.interested_at || lead.status !== 'INTERESTED') f.interested_at = ended;
+
+      if (outcome === 'TRIAL') {
+        f.trial_days = trialDays;
+        f.trial_started_at = ended;
+        f.trial_ends_at = trialEnds;
+        f.trial_count = (lead.trial_count || 0) + 1;      // 1st demo, 2nd demo …
+        // Account is NOT opened merely because trial started or expires
+      }
+      if (outcome === 'DONE_SOLD') {
+        f.sold_at = ended;
+        f.sold_by = req.user.id;
+        // Purchase confirmed → activate account
+        f.account_status = 'OPENED';
+        f.executive_id = req.user.id;
+      }
+      // Clearing trial fields when moving away from trial
+      if (outcome !== 'TRIAL' && outcome !== 'FOLLOWUP') {
+        // keep history but do not force-null on every status change (optional clear only on Done/Sold / Not Interested)
+        if (outcome === 'DONE_SOLD' || outcome === 'NOT_INTERESTED') {
+          /* leave trial_* as historical record */
+        }
+      }
     }
     if (remark) f.remark = remark;
     if (b.group_joined !== undefined) f.group_joined = b.group_joined ? 1 : 0;
     if (b.webinar_status) f.webinar_status = b.webinar_status;
-    if (b.account_status) {
+    if (b.account_status && outcome !== 'DONE_SOLD') {
       f.account_status = b.account_status;
       if (b.account_status === 'OPENED') f.executive_id = req.user.id; // locks the client to this executive
     }
@@ -109,9 +164,14 @@ router.post('/:id/end', wrap(async (req, res) => {
   if (b.group_joined !== undefined && (b.group_joined ? 1 : 0) !== before.group_joined) changes.group_joined = [before.group_joined, b.group_joined ? 1 : 0];
   if (b.webinar_status && b.webinar_status !== before.webinar_status) changes.webinar_status = [before.webinar_status, b.webinar_status];
   if (b.account_status && b.account_status !== before.account_status) changes.account_status = [before.account_status, b.account_status];
-  const extra = Object.keys(changes).length ? ' · ' + Object.entries(changes).map(([k, [o, n]]) => `${k.replace('_status', '').replace('_', ' ')}: ${String(o)} → ${String(n)}`).join(', ') : '';
-  await logActivity(req, 'CALL_SAVED', `${before.name} — ${outcome ? outcome.replace('_', ' ') : 'no result entered'}${autoCallback ? ' (auto: no response)' : ''} · ${fmtDur(duration)}${extra}`, {
-    lead: before, details: { call_id: call.id, outcome, duration_sec: duration, remark, followup_at: followup, changes, auto_callback: autoCallback },
+  if (outcome === 'TRIAL') changes.trial = { days: trialDays, ends: trialEnds };
+  const extra = Object.keys(changes).length ? ' · ' + Object.entries(changes).map(([k, v]) => {
+    if (k === 'trial') return `demo #${(before.trial_count || 0) + 1} · ${v.days}d (ends ${v.ends})`;
+    const [o, n] = v;
+    return `${k.replace('_status', '').replace('_', ' ')}: ${String(o)} → ${String(n)}`;
+  }).join(', ') : '';
+  await logActivity(req, 'CALL_SAVED', `${before.name} — ${outcome ? outcome.replace(/_/g, ' ') : 'no result entered'}${autoCallback ? ' (auto: no response)' : ''} · ${fmtDur(duration)}${extra}`, {
+    lead: before, details: { call_id: call.id, outcome, duration_sec: duration, remark, followup_at: followup, trial_days: trialDays, trial_ends_at: trialEnds, changes, auto_callback: autoCallback },
   });
   res.json({ ok: true, duration, call_count: callCount, auto_callback: autoCallback });
 }));
